@@ -32,31 +32,38 @@ about, instead of anecdotal impressions from whichever thread you happened to se
 
 Implemented — see
 [docs/superpowers/specs/2026-08-15-reddit-signal-pipeline-design.md](docs/superpowers/specs/2026-08-15-reddit-signal-pipeline-design.md)
-for the full architecture, data formats, and Reddit API compliance approach, and
-[docs/superpowers/plans/2026-08-15-reddit-signal-pipeline-implementation.md](docs/superpowers/plans/2026-08-15-reddit-signal-pipeline-implementation.md)
-for the implementation plan.
+for the original pipeline architecture and
+[docs/superpowers/specs/2026-08-25-evidence-data-model-migration-design.md](docs/superpowers/specs/2026-08-25-evidence-data-model-migration-design.md)
+for the evidence/signal-candidate/canonical-topic data model it now runs on, plus the
+matching implementation plans in
+[docs/superpowers/plans/](docs/superpowers/plans/).
 
 ## Architecture
 
-Four independent, file-based stages chained by a single entrypoint. Each stage is a
-plain Python module and can also be run standalone.
+Four independent pipeline stages chained by a single entrypoint, backed by a SQLite
+database (`data/pi_agent.db`) instead of flat JSON files. Each stage is a plain Python
+module and can also be run standalone.
 
 ```text
 run_weekly.py
-  └─> fetch.py    → data/raw/<week>/<subreddit>.json
-  └─> extract.py  → data/extracted/<week>.json
-  └─> match.py    → data/registry.json (updated in place)
+  └─> fetch.py    → evidence table
+  └─> extract.py  → signal_candidate table
+  └─> match.py    → canonical_topic + topic_weekly_mentions tables
   └─> report.py   → data/reports/<week>.json, data/reports/<week>.csv
 ```
 
 - **fetch.py** — pulls new posts per subreddit via PRAW (official Reddit API wrapper),
-  storing only the minimal fields needed for topic analysis.
-- **extract.py** — calls the Claude API per post to extract a topic, description, and
-  category.
-- **match.py** — merges new topics into the persistent registry, matching against
-  existing canonical topics or creating new ones.
+  storing each as an immutable `evidence` row.
+- **extract.py** — classifies each not-yet-processed evidence row into a `signal_type`
+  (from the product intelligence signal taxonomy) plus a confidence score, storing it as
+  a `signal_candidate`.
+- **match.py** — matches new candidates against the `canonical_topic` registry (or
+  creates a new topic), incrementing per-week mention counts.
 - **report.py** — computes top topics by mention count and week-over-week trend
-  (new / rising / stable / falling) from the registry.
+  (new / rising / stable / falling) from the database, same output format as before.
+
+Use `python query.py topic <slug>` or `python query.py search <keyword>` for ad hoc
+inspection of the database during development.
 
 Credentials (Reddit API + Anthropic API keys) are stored in the OS credential vault via
 `keyring` — never in a plaintext file, never committed to the repo.
