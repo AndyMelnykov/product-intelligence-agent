@@ -1,18 +1,23 @@
 import json
-import os
-from datetime import date
 
 import anthropic
 
+import db
 from credentials import get_secret
-from weekutil import iso_week_string
 
-VALID_CATEGORIES = {
-    "feature_request",
-    "complaint",
-    "praise",
-    "question",
-    "competitor_comparison",
+SIGNAL_TYPES = {
+    "complaint_rising",
+    "complaint_falling",
+    "new_feature_demand",
+    "new_use_case",
+    "usability_issue",
+    "reliability_issue",
+    "pricing_complaint",
+    "switching_intent",
+    "competitor_mention_rising",
+    "customer_migration_intent",
+    "churn_related_issue",
+    "positive_adoption_pattern",
 }
 
 EXTRACTION_MODEL = "claude-sonnet-5"
@@ -21,12 +26,12 @@ EXTRACTION_PROMPT_TEMPLATE = """You are analyzing a Reddit post about a software
 feedback signal extraction.
 
 Post title: {title}
-Post body: {selftext}
+Post body: {content}
 
 Respond with ONLY a JSON object with these exact keys:
-- "topic": a short topic name (3-6 words)
-- "description": a one-line description of what's being said
-- "category": one of "feature_request", "complaint", "praise", "question", "competitor_comparison"
+- "signal_type": one of {signal_types}
+- "summary": a one-line description of what's being said
+- "confidence": a number between 0.0 and 1.0 for how confident you are in this classification
 
 If the post is not meaningful product feedback (spam, off-topic, low-effort, or clearly \
 AI-generated filler), respond with exactly: {{"skip": true}}
@@ -37,12 +42,15 @@ class ExtractionError(Exception):
     pass
 
 
-def build_extraction_prompt(post: dict) -> str:
-    return EXTRACTION_PROMPT_TEMPLATE.format(title=post["title"], selftext=post["selftext"])
+def build_extraction_prompt(evidence: dict) -> str:
+    return EXTRACTION_PROMPT_TEMPLATE.format(
+        title=evidence["title"], content=evidence["content"],
+        signal_types=", ".join(f'"{t}"' for t in sorted(SIGNAL_TYPES)),
+    )
 
 
-def extract_topic(client, post: dict):
-    prompt = build_extraction_prompt(post)
+def extract_topic(client, evidence: dict):
+    prompt = build_extraction_prompt(evidence)
 
     try:
         response = client.messages.create(
@@ -52,56 +60,54 @@ def extract_topic(client, post: dict):
         )
         raw_text = response.content[0].text
     except Exception as e:
-        raise ExtractionError(f"post {post['id']}: API call failed: {e}") from e
+        raise ExtractionError(f"evidence {evidence['evidence_id']}: API call failed: {e}") from e
 
     try:
         parsed = json.loads(raw_text)
     except json.JSONDecodeError as e:
-        raise ExtractionError(f"post {post['id']}: non-JSON response: {raw_text!r}") from e
+        raise ExtractionError(f"evidence {evidence['evidence_id']}: non-JSON response: {raw_text!r}") from e
 
     if parsed.get("skip"):
         return None
 
-    missing = {"topic", "description", "category"} - parsed.keys()
+    missing = {"signal_type", "summary", "confidence"} - parsed.keys()
     if missing:
-        raise ExtractionError(f"post {post['id']}: response missing keys {missing}")
+        raise ExtractionError(f"evidence {evidence['evidence_id']}: response missing keys {missing}")
 
-    if parsed["category"] not in VALID_CATEGORIES:
-        raise ExtractionError(f"post {post['id']}: invalid category {parsed['category']!r}")
+    if parsed["signal_type"] not in SIGNAL_TYPES:
+        raise ExtractionError(f"evidence {evidence['evidence_id']}: invalid signal_type {parsed['signal_type']!r}")
 
-    return {
-        "post_id": post["id"],
-        "permalink": post["permalink"],
-        "score": post["score"],
-        "num_comments": post["num_comments"],
-        "topic": parsed["topic"],
-        "description": parsed["description"],
-        "category": parsed["category"],
-    }
+    return {"signal_type": parsed["signal_type"], "summary": parsed["summary"], "confidence": parsed["confidence"]}
 
 
-def run(raw_dir="data/raw", out_dir="data/extracted", today=None, client=None):
+def run(db_path="data/pi_agent.db", today=None, client=None):
     client = client or anthropic.Anthropic(api_key=get_secret("anthropic_api_key"))
-    week = iso_week_string(today or date.today())
-    week_raw_dir = os.path.join(raw_dir, week)
+    conn = db.connect(db_path)
+    db.init_db(conn)
 
-    extracted = []
-    if os.path.isdir(week_raw_dir):
-        for filename in sorted(os.listdir(week_raw_dir)):
-            with open(os.path.join(week_raw_dir, filename), "r", encoding="utf-8") as f:
-                posts = json.load(f)
-            for post in posts:
-                try:
-                    result = extract_topic(client, post)
-                except ExtractionError as e:
-                    print(f"skipping post due to extraction error: {e}")
-                    continue
-                if result is not None:
-                    extracted.append(result)
+    pending = db.get_evidence_without_candidate(conn)
+    try:
+        for evidence in pending:
+            try:
+                result = extract_topic(client, evidence)
+            except ExtractionError as e:
+                print(f"skipping evidence due to extraction error: {e}")
+                continue
+            if result is not None:
+                db.insert_signal_candidate(
+                    conn,
+                    evidence_id=evidence["evidence_id"],
+                    signal_type=result["signal_type"],
+                    summary=result["summary"],
+                    confidence=result["confidence"],
+                )
+    except Exception:
+        conn.rollback()
+        conn.close()
+        raise
 
-    os.makedirs(out_dir, exist_ok=True)
-    with open(os.path.join(out_dir, f"{week}.json"), "w", encoding="utf-8") as f:
-        json.dump(extracted, f, indent=2, sort_keys=True)
+    conn.commit()
+    conn.close()
 
 
 if __name__ == "__main__":

@@ -1,33 +1,34 @@
 import json
-import os
-import uuid
 from datetime import date
 
 import anthropic
 
+import db
 from credentials import get_secret
-from registry import load_registry, save_registry
 from weekutil import iso_week_string
 
 MATCH_MODEL = "claude-sonnet-5"
 
-MATCHING_PROMPT_TEMPLATE = """You are matching newly observed product feedback topics against a \
+MATCHING_PROMPT_TEMPLATE = """You are matching newly observed product feedback signals against a \
 canonical registry of existing topics for the same product.
 
 Existing canonical topics:
 {existing_topics_json}
 
-New topics observed this week:
-{new_topics_json}
+New signal candidates observed this week:
+{candidates_json}
 
-For each new topic (by its "index"), decide whether it is semantically the same as one \
-of the existing canonical topics, or a genuinely new topic.
+For each candidate (by its "index"), decide whether it is semantically the same as one of the \
+existing canonical topics, or represents a genuinely new topic.
 
-Respond with ONLY a JSON array, one object per new topic, in the same order as given:
-[{{"index": 0, "matched_id": "t_001"}}, {{"index": 1, "matched_id": null}}]
+Respond with ONLY a JSON array, one object per candidate, in the same order as given:
+[
+  {{"index": 0, "matched_topic_id": "TOPIC-0001", "new_topic": null}},
+  {{"index": 1, "matched_topic_id": null, "new_topic": {{"name": "Export to CSV", "slug": "export-to-csv", "description": "User wants CSV export"}}}}
+]
 
-Use "matched_id": null when the topic is new. Only match if the topics are truly about \
-the same underlying subject, not just the same category.
+Use "matched_topic_id": null and fill in "new_topic" only when the candidate is a genuinely new topic, \
+not just the same signal_type as an existing one. Slugs must be lowercase, hyphen-separated, and unique.
 """
 
 
@@ -35,30 +36,30 @@ class MatchError(Exception):
     pass
 
 
-def build_matching_prompt(new_topics, existing_topics):
+def build_matching_prompt(candidates, existing_topics):
     existing_summary = [
-        {"id": t["id"], "canonical_name": t["canonical_name"], "description": t["description"]}
+        {"topic_id": t["topic_id"], "name": t["name"], "description": t["description"]}
         for t in existing_topics
     ]
-    new_summary = [
-        {"index": i, "topic": t["topic"], "description": t["description"]}
-        for i, t in enumerate(new_topics)
+    candidate_summary = [
+        {"index": i, "signal_type": c["signal_type"], "summary": c["summary"]}
+        for i, c in enumerate(candidates)
     ]
     return MATCHING_PROMPT_TEMPLATE.format(
         existing_topics_json=json.dumps(existing_summary, indent=2),
-        new_topics_json=json.dumps(new_summary, indent=2),
+        candidates_json=json.dumps(candidate_summary, indent=2),
     )
 
 
-def _call_matcher(client, new_topics, existing_topics):
-    if not new_topics:
+def _call_matcher(client, candidates, existing_topics):
+    if not candidates:
         return []
 
-    prompt = build_matching_prompt(new_topics, existing_topics)
+    prompt = build_matching_prompt(candidates, existing_topics)
     try:
         response = client.messages.create(
             model=MATCH_MODEL,
-            max_tokens=1000,
+            max_tokens=1500,
             messages=[{"role": "user", "content": prompt}],
         )
         return json.loads(response.content[0].text)
@@ -66,52 +67,50 @@ def _call_matcher(client, new_topics, existing_topics):
         raise MatchError(f"matching call failed: {e}") from e
 
 
-def _default_id_factory():
-    return f"t_{uuid.uuid4().hex[:8]}"
+def apply_matches(conn, candidates, decisions, week):
+    decisions_by_index = {d["index"]: d for d in decisions}
 
+    for i, candidate in enumerate(candidates):
+        decision = decisions_by_index.get(i, {})
+        matched_topic_id = decision.get("matched_topic_id")
 
-def apply_matches(registry, new_topics, decisions, week, id_factory=_default_id_factory):
-    topics_by_id = {t["id"]: t for t in registry["topics"]}
-    decisions_by_index = {d["index"]: d["matched_id"] for d in decisions}
-
-    for i, new_topic in enumerate(new_topics):
-        matched_id = decisions_by_index.get(i)
-
-        if matched_id and matched_id in topics_by_id:
-            topic = topics_by_id[matched_id]
-            topic["weekly_mentions"][week] = topic["weekly_mentions"].get(week, 0) + 1
-            topic["example_permalinks"].append(new_topic["permalink"])
+        if matched_topic_id:
+            topic_id = matched_topic_id
+            db.update_topic_last_seen(conn, topic_id, week)
         else:
-            new_id = id_factory()
-            topic = {
-                "id": new_id,
-                "canonical_name": new_topic["topic"],
-                "description": new_topic["description"],
-                "category": new_topic["category"],
-                "first_seen_week": week,
-                "weekly_mentions": {week: 1},
-                "example_permalinks": [new_topic["permalink"]],
-            }
-            registry["topics"].append(topic)
-            topics_by_id[new_id] = topic
+            new_topic = decision["new_topic"]
+            topic_id = db.insert_canonical_topic(
+                conn,
+                slug=new_topic["slug"],
+                name=new_topic["name"],
+                description=new_topic["description"],
+                aliases=[],
+                first_seen=week,
+                last_seen=week,
+            )
 
-    return registry
+        db.set_candidate_topic(conn, candidate["candidate_id"], topic_id)
+        db.increment_topic_weekly_mentions(conn, topic_id, week, amount=1)
 
 
-def run(extracted_dir="data/extracted", registry_path="data/registry.json", today=None, client=None):
+def run(db_path="data/pi_agent.db", today=None, client=None):
     week = iso_week_string(today or date.today())
-    extracted_path = os.path.join(extracted_dir, f"{week}.json")
+    conn = db.connect(db_path)
+    db.init_db(conn)
 
-    new_topics = []
-    if os.path.exists(extracted_path):
-        with open(extracted_path, "r", encoding="utf-8") as f:
-            new_topics = json.load(f)
-
-    registry = load_registry(registry_path)
     client = client or anthropic.Anthropic(api_key=get_secret("anthropic_api_key"))
-    decisions = _call_matcher(client, new_topics, registry["topics"])
-    registry = apply_matches(registry, new_topics, decisions, week)
-    save_registry(registry_path, registry)
+    try:
+        candidates = db.get_candidates_without_topic(conn)
+        existing_topics = db.get_canonical_topics(conn)
+        decisions = _call_matcher(client, candidates, existing_topics)
+        apply_matches(conn, candidates, decisions, week)
+    except Exception:
+        conn.rollback()
+        conn.close()
+        raise
+
+    conn.commit()
+    conn.close()
 
 
 if __name__ == "__main__":

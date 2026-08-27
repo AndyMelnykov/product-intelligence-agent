@@ -5,6 +5,7 @@ from datetime import date
 import prawcore
 import pytest
 
+import db
 import fetch
 
 
@@ -166,41 +167,55 @@ def test_fetch_new_posts_wraps_generic_prawcore_error_as_fetch_error():
         fetch.fetch_new_posts(client, "sub", last_seen_fullname=None, limit=10)
 
 
-def test_run_writes_raw_json_and_updates_state(tmp_path):
+def test_run_inserts_evidence_rows_and_updates_state(tmp_path):
     submissions = {
         "suba": FakeSubreddit([make_submission("t3_a1")]),
         "subb": FakeSubreddit([make_submission("t3_b1")]),
     }
     client = FakeRedditClient(submissions)
     state_path = tmp_path / "state.json"
-    raw_dir = tmp_path / "raw"
+    db_path = tmp_path / "pi_agent.db"
 
     fetch.run(
         subreddits=["suba", "subb"],
         fetch_limit_per_subreddit=10,
         state_path=str(state_path),
-        raw_dir=str(raw_dir),
+        db_path=str(db_path),
         today=date(2026, 8, 15),
         reddit_client=client,
     )
 
-    week_dir = raw_dir / "2026-W33"
-    with open(week_dir / "suba.json", "r", encoding="utf-8") as f:
-        assert json.load(f)[0]["id"] == "a1"
+    conn = db.connect(str(db_path))
+    rows = conn.execute(
+        "SELECT source_name, source_url, title, captured_at FROM evidence ORDER BY evidence_id"
+    ).fetchall()
+    conn.close()
+
+    assert [dict(r) for r in rows] == [
+        {"source_name": "suba", "source_url": "/r/test/comments/t3_a1", "title": "A title",
+         "captured_at": "2026-08-15T00:00:00+00:00"},
+        {"source_name": "subb", "source_url": "/r/test/comments/t3_b1", "title": "A title",
+         "captured_at": "2026-08-15T00:00:00+00:00"},
+    ]
+
     with open(state_path, "r", encoding="utf-8") as f:
-        state = json.load(f)
-    assert state == {"suba": "t3_a1", "subb": "t3_b1"}
+        assert json.load(f) == {"suba": "t3_a1", "subb": "t3_b1"}
 
 
-def test_run_leaves_state_untouched_when_a_subreddit_fetch_fails(tmp_path, monkeypatch):
+def test_run_leaves_state_and_db_untouched_when_a_subreddit_fetch_fails(tmp_path, monkeypatch):
     state_path = tmp_path / "state.json"
     with open(state_path, "w", encoding="utf-8") as f:
         json.dump({"suba": "t3_old"}, f)
+    db_path = tmp_path / "pi_agent.db"
 
     def failing_fetch(client, subreddit_name, last_seen_fullname, limit):
         if subreddit_name == "subb":
             raise RuntimeError("Reddit API error")
-        return [], last_seen_fullname
+        return [{
+            "id": "a1", "title": "A title", "selftext": "body",
+            "permalink": "/r/test/comments/t3_a1", "score": 10, "num_comments": 2,
+            "created_utc": 1700000000.0,
+        }], "t3_a1"
 
     monkeypatch.setattr(fetch, "fetch_new_posts", failing_fetch)
 
@@ -209,10 +224,15 @@ def test_run_leaves_state_untouched_when_a_subreddit_fetch_fails(tmp_path, monke
             subreddits=["suba", "subb"],
             fetch_limit_per_subreddit=10,
             state_path=str(state_path),
-            raw_dir=str(tmp_path / "raw"),
+            db_path=str(db_path),
             today=date(2026, 8, 15),
             reddit_client=FakeRedditClient({}),
         )
 
     with open(state_path, "r", encoding="utf-8") as f:
         assert json.load(f) == {"suba": "t3_old"}
+
+    conn = db.connect(str(db_path))
+    db.init_db(conn)
+    assert conn.execute("SELECT COUNT(*) FROM evidence").fetchone()[0] == 0
+    conn.close()
