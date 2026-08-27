@@ -1,4 +1,5 @@
 praw
+prawcore
 anthropic
 pyyaml
 keyring

@@ -2,10 +2,30 @@ import json
 import os
 from datetime import date
 
+import prawcore
 import pytest
 
 import db
 import fetch
+
+
+class FakeErrorSubreddit:
+    def __init__(self, error):
+        self._error = error
+
+    def new(self, limit):
+        def gen():
+            raise self._error
+            yield  # pragma: no cover - unreachable, makes this a generator
+
+        return gen()
+
+
+class FakeResponse:
+    def __init__(self, status_code, headers=None, text=""):
+        self.status_code = status_code
+        self.headers = headers or {}
+        self.text = text
 
 
 class FakeSubmission:
@@ -101,6 +121,50 @@ def test_fetch_new_posts_skips_removed_and_deleted():
 
     assert [p["id"] for p in posts] == ["new5"]
     assert newest == "t3_new3"
+
+
+def test_fetch_new_posts_wraps_connection_error_as_fetch_error():
+    error = prawcore.exceptions.RequestException(ConnectionError("boom"), (), {})
+    client = FakeRedditClient({"sub": FakeErrorSubreddit(error)})
+
+    with pytest.raises(fetch.FetchError, match="unavailable"):
+        fetch.fetch_new_posts(client, "sub", last_seen_fullname=None, limit=10)
+
+
+def test_fetch_new_posts_wraps_rate_limit_error_as_fetch_error():
+    response = FakeResponse(429, headers={"retry-after": "30"})
+    error = prawcore.exceptions.TooManyRequests(response)
+    client = FakeRedditClient({"sub": FakeErrorSubreddit(error)})
+
+    with pytest.raises(fetch.FetchError, match="rate-limited"):
+        fetch.fetch_new_posts(client, "sub", last_seen_fullname=None, limit=10)
+
+
+def test_fetch_new_posts_wraps_forbidden_error_as_fetch_error():
+    response = FakeResponse(403)
+    error = prawcore.exceptions.Forbidden(response)
+    client = FakeRedditClient({"sub": FakeErrorSubreddit(error)})
+
+    with pytest.raises(fetch.FetchError, match="auth"):
+        fetch.fetch_new_posts(client, "sub", last_seen_fullname=None, limit=10)
+
+
+def test_fetch_new_posts_wraps_server_error_as_fetch_error():
+    response = FakeResponse(503)
+    error = prawcore.exceptions.ServerError(response)
+    client = FakeRedditClient({"sub": FakeErrorSubreddit(error)})
+
+    with pytest.raises(fetch.FetchError, match="server error"):
+        fetch.fetch_new_posts(client, "sub", last_seen_fullname=None, limit=10)
+
+
+def test_fetch_new_posts_wraps_generic_prawcore_error_as_fetch_error():
+    response = FakeResponse(404)
+    error = prawcore.exceptions.NotFound(response)
+    client = FakeRedditClient({"sub": FakeErrorSubreddit(error)})
+
+    with pytest.raises(fetch.FetchError, match="sub"):
+        fetch.fetch_new_posts(client, "sub", last_seen_fullname=None, limit=10)
 
 
 def test_run_inserts_evidence_rows_and_updates_state(tmp_path):

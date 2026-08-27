@@ -1,12 +1,31 @@
 from datetime import date, datetime, timezone
 
 import praw
+import prawcore
 
 import db
 from credentials import get_secret
 from state import load_state, save_state
 
 REMOVED_MARKERS = {"[deleted]", "[removed]"}
+
+
+class FetchError(Exception):
+    pass
+
+
+def _wrap_prawcore_error(subreddit_name: str, error: prawcore.exceptions.PrawcoreException) -> FetchError:
+    if isinstance(error, prawcore.exceptions.RequestException):
+        return FetchError(
+            f"r/{subreddit_name}: Reddit API unavailable (network error): {error.original_exception}"
+        )
+    if isinstance(error, prawcore.exceptions.TooManyRequests):
+        return FetchError(f"r/{subreddit_name}: Reddit API rate-limited: {error}")
+    if isinstance(error, (prawcore.exceptions.OAuthException, prawcore.exceptions.Forbidden)):
+        return FetchError(f"r/{subreddit_name}: Reddit API authentication/authorization error: {error}")
+    if isinstance(error, prawcore.exceptions.ServerError):
+        return FetchError(f"r/{subreddit_name}: Reddit API server error (5xx): {error}")
+    return FetchError(f"r/{subreddit_name}: Reddit API error: {error}")
 
 
 def build_reddit_client():
@@ -38,17 +57,20 @@ def fetch_new_posts(reddit_client, subreddit_name, last_seen_fullname, limit):
     posts = []
     newest_fullname = last_seen_fullname
 
-    for submission in subreddit.new(limit=limit):
-        if newest_fullname == last_seen_fullname:
-            newest_fullname = submission.fullname
+    try:
+        for submission in subreddit.new(limit=limit):
+            if newest_fullname == last_seen_fullname:
+                newest_fullname = submission.fullname
 
-        if submission.fullname == last_seen_fullname:
-            break
+            if submission.fullname == last_seen_fullname:
+                break
 
-        if _is_removed(submission):
-            continue
+            if _is_removed(submission):
+                continue
 
-        posts.append(_post_to_dict(submission))
+            posts.append(_post_to_dict(submission))
+    except prawcore.exceptions.PrawcoreException as e:
+        raise _wrap_prawcore_error(subreddit_name, e) from e
 
     return posts, newest_fullname
 
