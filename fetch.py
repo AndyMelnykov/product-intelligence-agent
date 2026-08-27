@@ -1,12 +1,10 @@
-import json
-import os
-from datetime import date
+from datetime import date, datetime, timezone
 
 import praw
 
+import db
 from credentials import get_secret
 from state import load_state, save_state
-from weekutil import iso_week_string
 
 REMOVED_MARKERS = {"[deleted]", "[removed]"}
 
@@ -55,24 +53,44 @@ def fetch_new_posts(reddit_client, subreddit_name, last_seen_fullname, limit):
     return posts, newest_fullname
 
 
-def run(subreddits, fetch_limit_per_subreddit, state_path="data/state.json", raw_dir="data/raw", today=None, reddit_client=None):
+def run(subreddits, fetch_limit_per_subreddit, state_path="data/state.json",
+        db_path="data/pi_agent.db", today=None, reddit_client=None):
     reddit_client = reddit_client or build_reddit_client()
     state = load_state(state_path)
-    week = iso_week_string(today or date.today())
-    week_dir = os.path.join(raw_dir, week)
-    os.makedirs(week_dir, exist_ok=True)
+    run_date = today or date.today()
+    captured_at = datetime(run_date.year, run_date.month, run_date.day, tzinfo=timezone.utc).isoformat()
 
-    for subreddit_name in subreddits:
-        last_seen = state.get(subreddit_name)
-        posts, newest = fetch_new_posts(reddit_client, subreddit_name, last_seen, fetch_limit_per_subreddit)
+    conn = db.connect(db_path)
+    db.init_db(conn)
 
-        out_path = os.path.join(week_dir, f"{subreddit_name}.json")
-        with open(out_path, "w", encoding="utf-8") as f:
-            json.dump(posts, f, indent=2, sort_keys=True)
+    new_state = dict(state)
+    try:
+        for subreddit_name in subreddits:
+            last_seen = state.get(subreddit_name)
+            posts, newest = fetch_new_posts(reddit_client, subreddit_name, last_seen, fetch_limit_per_subreddit)
 
-        state[subreddit_name] = newest
+            for post in posts:
+                db.insert_evidence(
+                    conn,
+                    source_type="reddit_post",
+                    source_name=subreddit_name,
+                    source_url=post["permalink"],
+                    captured_at=captured_at,
+                    published_at=datetime.fromtimestamp(post["created_utc"], tz=timezone.utc).isoformat(),
+                    title=post["title"],
+                    content=post["selftext"],
+                    metadata={"reddit_post_id": post["id"], "score": post["score"], "num_comments": post["num_comments"]},
+                )
 
-    save_state(state_path, state)
+            new_state[subreddit_name] = newest
+    except Exception:
+        conn.rollback()
+        conn.close()
+        raise
+
+    conn.commit()
+    conn.close()
+    save_state(state_path, new_state)
 
 
 if __name__ == "__main__":
