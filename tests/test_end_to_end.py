@@ -2,11 +2,11 @@ import csv
 import json
 from datetime import date
 
+import db
 import extract
 import fetch
 import match
 import report
-from registry import load_registry
 
 
 class FakeSubmission:
@@ -72,30 +72,34 @@ def test_full_pipeline_from_fetch_to_report(tmp_path):
     })
 
     extract_client = FakeAnthropicClient([
-        json.dumps({"topic": "Dark mode support", "description": "User wants dark theme", "category": "feature_request"}),
+        json.dumps({"signal_type": "new_feature_demand", "summary": "User wants dark theme", "confidence": 0.9}),
     ])
     match_client = FakeAnthropicClient([
-        json.dumps([{"index": 0, "matched_id": None}]),
+        json.dumps([{
+            "index": 0, "matched_topic_id": None,
+            "new_topic": {"name": "Dark mode support", "slug": "dark-mode-support",
+                          "description": "Users requesting a dark theme option"},
+        }]),
     ])
 
     state_path = tmp_path / "state.json"
-    raw_dir = tmp_path / "raw"
-    extracted_dir = tmp_path / "extracted"
-    registry_path = tmp_path / "registry.json"
+    db_path = tmp_path / "pi_agent.db"
     report_dir = tmp_path / "reports"
     today = date(2026, 8, 15)
 
     fetch.run(
         subreddits=["yourproductname"], fetch_limit_per_subreddit=10,
-        state_path=str(state_path), raw_dir=str(raw_dir), today=today, reddit_client=reddit_client,
+        state_path=str(state_path), db_path=str(db_path), today=today, reddit_client=reddit_client,
     )
-    extract.run(raw_dir=str(raw_dir), out_dir=str(extracted_dir), today=today, client=extract_client)
-    match.run(extracted_dir=str(extracted_dir), registry_path=str(registry_path), today=today, client=match_client)
-    report.run(registry_path=str(registry_path), report_dir=str(report_dir), trend_window_weeks=8, today=today)
+    extract.run(db_path=str(db_path), today=today, client=extract_client)
+    match.run(db_path=str(db_path), today=today, client=match_client)
+    report.run(db_path=str(db_path), report_dir=str(report_dir), trend_window_weeks=8, today=today)
 
-    registry = load_registry(str(registry_path))
-    assert registry["topics"][0]["canonical_name"] == "Dark mode support"
-    assert registry["topics"][0]["weekly_mentions"]["2026-W33"] == 1
+    conn = db.connect(str(db_path))
+    topic = db.get_canonical_topic_by_slug(conn, "dark-mode-support")
+    assert topic["name"] == "Dark mode support"
+    assert db.get_topic_weekly_mentions(conn, topic["topic_id"]) == {"2026-W33": 1}
+    conn.close()
 
     with open(report_dir / "2026-W33.json", "r", encoding="utf-8") as f:
         report_rows = json.load(f)
