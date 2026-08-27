@@ -3,7 +3,7 @@ import json
 import os
 from datetime import date
 
-from registry import load_registry
+import db
 from weekutil import iso_week_string
 
 TREND_NEW = "new"
@@ -14,7 +14,7 @@ TREND_FALLING = "falling"
 RISING_THRESHOLD = 1.2
 FALLING_THRESHOLD = 0.8
 
-REPORT_FIELDNAMES = ["id", "canonical_name", "category", "mentions_this_week", "total_mentions", "trend"]
+REPORT_FIELDNAMES = ["id", "canonical_name", "mentions_this_week", "total_mentions", "trend"]
 
 
 def _recent_average(weekly_mentions, current_week, trend_window_weeks):
@@ -42,20 +42,19 @@ def _trend_direction(mentions_this_week, recent_average, first_seen_week, curren
     return TREND_STABLE
 
 
-def compute_trends(registry, current_week, trend_window_weeks):
+def compute_trends(topics, current_week, trend_window_weeks):
     rows = []
-    for topic in registry["topics"]:
+    for topic in topics:
         weekly = topic["weekly_mentions"]
         mentions_this_week = weekly.get(current_week, 0)
         recent_average = _recent_average(weekly, current_week, trend_window_weeks)
 
         rows.append({
-            "id": topic["id"],
-            "canonical_name": topic["canonical_name"],
-            "category": topic["category"],
+            "id": topic["topic_id"],
+            "canonical_name": topic["name"],
             "mentions_this_week": mentions_this_week,
             "total_mentions": sum(weekly.values()),
-            "trend": _trend_direction(mentions_this_week, recent_average, topic["first_seen_week"], current_week),
+            "trend": _trend_direction(mentions_this_week, recent_average, topic["first_seen"], current_week),
         })
 
     rows.sort(key=lambda r: r["mentions_this_week"], reverse=True)
@@ -74,10 +73,16 @@ def write_report(rows, json_path, csv_path):
         writer.writerows(rows)
 
 
-def run(registry_path="data/registry.json", report_dir="data/reports", trend_window_weeks=8, today=None):
+def run(db_path="data/pi_agent.db", report_dir="data/reports", trend_window_weeks=8, today=None):
     week = iso_week_string(today or date.today())
-    registry = load_registry(registry_path)
-    rows = compute_trends(registry, week, trend_window_weeks)
+    conn = db.connect(db_path)
+    db.init_db(conn)
+    topics = db.get_canonical_topics(conn)
+    for topic in topics:
+        topic["weekly_mentions"] = db.get_topic_weekly_mentions(conn, topic["topic_id"])
+    conn.close()
+
+    rows = compute_trends(topics, week, trend_window_weeks)
     write_report(rows, os.path.join(report_dir, f"{week}.json"), os.path.join(report_dir, f"{week}.csv"))
 
 
