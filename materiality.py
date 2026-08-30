@@ -1,6 +1,10 @@
 import json
 import os
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
+
+import db
+import report
+from weekutil import iso_week_string
 
 EVENT_DRIVEN_HIGH_SIGNAL_TYPES = {
     "product_launch", "feature_launch", "major_feature_improvement", "feature_removal",
@@ -118,3 +122,57 @@ def emit_event(material_signal, events_path=DEFAULT_EVENTS_PATH):
     with open(events_path, "a", encoding="utf-8") as f:
         f.write(json.dumps(envelope) + "\n")
     return envelope
+
+
+def _week_of_iso_timestamp(iso_timestamp):
+    return iso_week_string(datetime.fromisoformat(iso_timestamp).date())
+
+
+def run(db_path="data/pi_agent.db", trend_window_weeks=8, today=None, events_path=DEFAULT_EVENTS_PATH):
+    run_date = today or date.today()
+    week = iso_week_string(run_date)
+    conn = db.connect(db_path)
+    db.init_db(conn)
+
+    topics = db.get_canonical_topics(conn)
+    for topic in topics:
+        topic["weekly_mentions"] = db.get_topic_weekly_mentions(conn, topic["topic_id"])
+    trend_by_topic_id = {row["id"]: row for row in report.compute_trends(topics, week, trend_window_weeks)}
+
+    created_signals = []
+    try:
+        for topic in topics:
+            candidates = db.get_candidates_for_topic(conn, topic["topic_id"])
+            candidates_this_week = [c for c in candidates if _week_of_iso_timestamp(c["captured_at"]) == week]
+            if not candidates_this_week:
+                continue
+
+            trend_row = trend_by_topic_id[topic["topic_id"]]
+            avg_confidence = sum(c["confidence"] for c in candidates_this_week) / len(candidates_this_week)
+            signal_type = _dominant_signal_type(candidates_this_week)
+            materiality_result = classify_materiality(
+                signal_type=signal_type, trend=trend_row["trend"],
+                mentions_this_week=trend_row["mentions_this_week"], avg_confidence=avg_confidence,
+            )
+            if materiality_result["label"] not in ("high", "critical"):
+                continue
+
+            material_signal = build_material_signal(
+                topic, candidates_this_week, trend_row["trend"], materiality_result, run_date,
+            )
+            signal_id = db.insert_material_signal(conn, **material_signal)
+            created_signals.append({**material_signal, "signal_id": signal_id})
+    except Exception:
+        conn.rollback()
+        conn.close()
+        raise
+
+    conn.commit()
+    conn.close()
+
+    for material_signal in created_signals:
+        emit_event(material_signal, events_path=events_path)
+
+
+if __name__ == "__main__":
+    run()

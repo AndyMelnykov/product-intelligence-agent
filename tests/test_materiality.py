@@ -1,6 +1,7 @@
 import json
 from datetime import date
 
+import db
 import materiality
 
 
@@ -155,3 +156,98 @@ def test_emit_event_appends_without_truncating_existing_events(tmp_path):
         lines = f.readlines()
     assert len(lines) == 2
     assert json.loads(lines[1])["signal"]["signal_id"] == "SIG-2026-0002"
+
+
+def test_run_creates_material_signal_and_emits_event_for_high_materiality_topic(tmp_path):
+    db_path = tmp_path / "pi_agent.db"
+    events_path = tmp_path / "events.jsonl"
+    conn = db.connect(str(db_path))
+    db.init_db(conn)
+
+    topic_id = db.insert_canonical_topic(
+        conn, slug="dark-mode-support", name="Dark mode support", description="d",
+        aliases=[], first_seen="2026-W30", last_seen="2026-W30",
+    )
+    db.increment_topic_weekly_mentions(conn, topic_id, "2026-W30", amount=1)
+    db.increment_topic_weekly_mentions(conn, topic_id, "2026-W31", amount=1)
+    db.increment_topic_weekly_mentions(conn, topic_id, "2026-W32", amount=1)
+    for i in range(6):
+        evidence_id = db.insert_evidence(
+            conn, source_type="reddit_post", source_name="sub", source_url=f"/p{i}",
+            captured_at="2026-08-15T00:00:00+00:00", published_at="2026-08-14T00:00:00+00:00",
+            title="t", content="c", metadata={},
+        )
+        db.insert_signal_candidate(
+            conn, evidence_id=evidence_id, signal_type="new_feature_demand",
+            summary="s", confidence=0.9, topic_id=topic_id,
+        )
+    db.increment_topic_weekly_mentions(conn, topic_id, "2026-W33", amount=6)
+    conn.commit()
+    conn.close()
+
+    materiality.run(db_path=str(db_path), today=date(2026, 8, 15), events_path=str(events_path))
+
+    conn = db.connect(str(db_path))
+    signals = conn.execute("SELECT signal_id FROM material_signal").fetchall()
+    conn.close()
+    assert len(signals) == 1
+
+    with open(events_path, "r", encoding="utf-8") as f:
+        lines = f.readlines()
+    assert len(lines) == 1
+
+
+def test_run_does_not_create_signal_for_low_materiality_topic(tmp_path):
+    db_path = tmp_path / "pi_agent.db"
+    events_path = tmp_path / "events.jsonl"
+    conn = db.connect(str(db_path))
+    db.init_db(conn)
+
+    topic_id = db.insert_canonical_topic(
+        conn, slug="minor-topic", name="Minor topic", description="d",
+        aliases=[], first_seen="2026-W30", last_seen="2026-W32",
+    )
+    db.increment_topic_weekly_mentions(conn, topic_id, "2026-W30", amount=5)
+    db.increment_topic_weekly_mentions(conn, topic_id, "2026-W31", amount=5)
+    db.increment_topic_weekly_mentions(conn, topic_id, "2026-W32", amount=5)
+    evidence_id = db.insert_evidence(
+        conn, source_type="reddit_post", source_name="sub", source_url="/p1",
+        captured_at="2026-08-15T00:00:00+00:00", published_at="2026-08-14T00:00:00+00:00",
+        title="t", content="c", metadata={},
+    )
+    db.insert_signal_candidate(
+        conn, evidence_id=evidence_id, signal_type="new_feature_demand",
+        summary="s", confidence=0.9, topic_id=topic_id,
+    )
+    db.increment_topic_weekly_mentions(conn, topic_id, "2026-W33", amount=1)
+    conn.commit()
+    conn.close()
+
+    materiality.run(db_path=str(db_path), today=date(2026, 8, 15), events_path=str(events_path))
+
+    conn = db.connect(str(db_path))
+    signals = conn.execute("SELECT signal_id FROM material_signal").fetchall()
+    conn.close()
+    assert signals == []
+    assert not events_path.exists()
+
+
+def test_run_skips_topics_with_no_new_evidence_this_week(tmp_path):
+    db_path = tmp_path / "pi_agent.db"
+    events_path = tmp_path / "events.jsonl"
+    conn = db.connect(str(db_path))
+    db.init_db(conn)
+    topic_id = db.insert_canonical_topic(
+        conn, slug="idle-topic", name="Idle topic", description="d",
+        aliases=[], first_seen="2026-W30", last_seen="2026-W30",
+    )
+    db.increment_topic_weekly_mentions(conn, topic_id, "2026-W30", amount=1)
+    conn.commit()
+    conn.close()
+
+    materiality.run(db_path=str(db_path), today=date(2026, 8, 15), events_path=str(events_path))
+
+    conn = db.connect(str(db_path))
+    signals = conn.execute("SELECT signal_id FROM material_signal").fetchall()
+    conn.close()
+    assert signals == []
