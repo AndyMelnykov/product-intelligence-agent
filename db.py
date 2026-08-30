@@ -41,6 +41,22 @@ CREATE TABLE IF NOT EXISTS topic_weekly_mentions (
   mentions INTEGER NOT NULL,
   PRIMARY KEY (topic_id, period)
 );
+
+CREATE TABLE IF NOT EXISTS material_signal (
+  signal_id TEXT PRIMARY KEY,
+  created_at TEXT NOT NULL,
+  signal_type TEXT NOT NULL,
+  topic_id TEXT REFERENCES canonical_topic(topic_id),
+  entity TEXT NOT NULL,
+  summary TEXT NOT NULL,
+  confidence_label TEXT NOT NULL,
+  materiality_label TEXT NOT NULL,
+  materiality_score REAL NOT NULL,
+  materiality_reasons TEXT NOT NULL,
+  evidence_ids TEXT NOT NULL,
+  change_type TEXT NOT NULL,
+  recommended_next_step TEXT NOT NULL
+);
 """
 
 
@@ -191,5 +207,44 @@ def search_evidence_and_candidates(conn, keyword):
         "FROM signal_candidate sc JOIN evidence e ON e.evidence_id = sc.evidence_id "
         "WHERE e.title LIKE ? OR e.content LIKE ? OR sc.summary LIKE ?",
         (like, like, like),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def _material_signal_row_to_dict(row):
+    d = dict(row)
+    d["entity"] = json.loads(d["entity"])
+    d["materiality_reasons"] = json.loads(d["materiality_reasons"])
+    d["evidence_ids"] = json.loads(d["evidence_ids"])
+    return d
+
+
+def insert_material_signal(conn, *, created_at, signal_type, topic_id, entity, summary, confidence_label,
+                            materiality_label, materiality_score, materiality_reasons, evidence_ids,
+                            change_type, recommended_next_step):
+    year = created_at[:4]
+    signal_id = _next_sequence_id(conn, "material_signal", "signal_id", f"SIG-{year}-", 4)
+    conn.execute(
+        "INSERT INTO material_signal (signal_id, created_at, signal_type, topic_id, entity, summary, "
+        "confidence_label, materiality_label, materiality_score, materiality_reasons, evidence_ids, "
+        "change_type, recommended_next_step) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (signal_id, created_at, signal_type, topic_id, json.dumps(entity, sort_keys=True), summary,
+         confidence_label, materiality_label, materiality_score, json.dumps(materiality_reasons),
+         json.dumps(evidence_ids), change_type, recommended_next_step),
+    )
+    return signal_id
+
+
+def get_material_signal(conn, signal_id):
+    row = conn.execute("SELECT * FROM material_signal WHERE signal_id = ?", (signal_id,)).fetchone()
+    return _material_signal_row_to_dict(row) if row else None
+
+
+def get_candidates_for_topic(conn, topic_id):
+    rows = conn.execute(
+        "SELECT sc.candidate_id, sc.evidence_id, sc.signal_type, sc.summary, sc.confidence, e.captured_at "
+        "FROM signal_candidate sc JOIN evidence e ON e.evidence_id = sc.evidence_id "
+        "WHERE sc.topic_id = ? ORDER BY sc.candidate_id",
+        (topic_id,),
     ).fetchall()
     return [dict(r) for r in rows]

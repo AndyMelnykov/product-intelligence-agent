@@ -27,7 +27,7 @@ def _insert_sample_evidence(conn, **overrides):
 
 def test_init_db_creates_all_tables(conn):
     tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-    assert {"evidence", "canonical_topic", "signal_candidate", "topic_weekly_mentions"} <= tables
+    assert {"evidence", "canonical_topic", "signal_candidate", "topic_weekly_mentions", "material_signal"} <= tables
 
 
 def test_insert_evidence_returns_sequential_ids_scoped_by_year(conn):
@@ -177,3 +177,78 @@ def test_search_evidence_and_candidates_matches_title_content_or_summary(conn):
     assert len(by_title) == 1
     assert len(by_summary) == 1
     assert no_match == []
+
+
+def test_insert_material_signal_returns_sequential_ids_scoped_by_year(conn):
+    evidence_id = _insert_sample_evidence(conn)
+    topic_id = db.insert_canonical_topic(
+        conn, slug="dark-mode-support", name="Dark mode support", description="d",
+        aliases=[], first_seen="2026-W30", last_seen="2026-W33",
+    )
+
+    def _insert(created_at):
+        return db.insert_material_signal(
+            conn, created_at=created_at, signal_type="new_feature_demand", topic_id=topic_id,
+            entity={"type": "customer_topic", "topic_id": topic_id, "topic_name": "Dark mode support"},
+            summary="Dark mode support: rising", confidence_label="high",
+            materiality_label="high", materiality_score=0.8,
+            materiality_reasons=["trend is rising with 5 mentions this week"],
+            evidence_ids=[evidence_id], change_type="trend_change",
+            recommended_next_step="strategic_assessment",
+        )
+
+    first = _insert("2026-08-23T14:32:00+00:00")
+    second = _insert("2026-08-23T15:00:00+00:00")
+    third = _insert("2027-01-05T00:00:00+00:00")
+
+    assert first == "SIG-2026-0001"
+    assert second == "SIG-2026-0002"
+    assert third == "SIG-2027-0001"
+
+
+def test_get_material_signal_round_trips_json_fields(conn):
+    evidence_id = _insert_sample_evidence(conn)
+    topic_id = db.insert_canonical_topic(
+        conn, slug="dark-mode-support", name="Dark mode support", description="d",
+        aliases=[], first_seen="2026-W30", last_seen="2026-W33",
+    )
+    signal_id = db.insert_material_signal(
+        conn, created_at="2026-08-23T14:32:00+00:00", signal_type="new_feature_demand", topic_id=topic_id,
+        entity={"type": "customer_topic", "topic_id": topic_id, "topic_name": "Dark mode support"},
+        summary="Dark mode support: rising", confidence_label="high",
+        materiality_label="high", materiality_score=0.8,
+        materiality_reasons=["trend is rising with 5 mentions this week"],
+        evidence_ids=[evidence_id], change_type="trend_change",
+        recommended_next_step="strategic_assessment",
+    )
+
+    signal = db.get_material_signal(conn, signal_id)
+
+    assert signal["signal_id"] == signal_id
+    assert signal["entity"] == {"type": "customer_topic", "topic_id": topic_id, "topic_name": "Dark mode support"}
+    assert signal["materiality_reasons"] == ["trend is rising with 5 mentions this week"]
+    assert signal["evidence_ids"] == [evidence_id]
+    assert signal["materiality_label"] == "high"
+
+
+def test_get_material_signal_returns_none_for_unknown_id(conn):
+    assert db.get_material_signal(conn, "SIG-2026-9999") is None
+
+
+def test_get_candidates_for_topic_returns_joined_rows_ordered_by_candidate_id(conn):
+    evidence_id = _insert_sample_evidence(conn, captured_at="2026-08-15T00:00:00+00:00")
+    topic_id = db.insert_canonical_topic(
+        conn, slug="dark-mode-support", name="Dark mode support", description="d",
+        aliases=[], first_seen="2026-W33", last_seen="2026-W33",
+    )
+    candidate_id = db.insert_signal_candidate(
+        conn, evidence_id=evidence_id, signal_type="new_feature_demand",
+        summary="User wants dark mode", confidence=0.9, topic_id=topic_id,
+    )
+
+    candidates = db.get_candidates_for_topic(conn, topic_id)
+
+    assert candidates == [{
+        "candidate_id": candidate_id, "evidence_id": evidence_id, "signal_type": "new_feature_demand",
+        "summary": "User wants dark mode", "confidence": 0.9, "captured_at": "2026-08-15T00:00:00+00:00",
+    }]
