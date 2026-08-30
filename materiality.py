@@ -1,3 +1,5 @@
+import json
+import os
 from datetime import datetime, timezone
 
 EVENT_DRIVEN_HIGH_SIGNAL_TYPES = {
@@ -91,3 +93,28 @@ def build_material_signal(topic, candidates_this_week, trend, materiality, today
             "urgent_strategic_assessment" if materiality["label"] == "critical" else "strategic_assessment"
         ),
     }
+
+
+EVENT_NAME = "product_intelligence.signal.material"
+EVENT_VERSION = "1.0"
+DEFAULT_EVENTS_PATH = "data/events.jsonl"
+
+
+def emit_event(material_signal, events_path=DEFAULT_EVENTS_PATH):
+    envelope = {
+        "event": EVENT_NAME,
+        "event_version": EVENT_VERSION,
+        "timestamp": material_signal["created_at"],
+        "signal": {
+            "signal_id": material_signal["signal_id"],
+            "signal_type": material_signal["signal_type"],
+            "summary": material_signal["summary"],
+            "confidence": material_signal["confidence_label"],
+            "materiality": material_signal["materiality_label"],
+            "evidence_ids": material_signal["evidence_ids"],
+        },
+    }
+    os.makedirs(os.path.dirname(events_path) or ".", exist_ok=True)
+    with open(events_path, "a", encoding="utf-8") as f:
+        f.write(json.dumps(envelope) + "\n")
+    return envelope

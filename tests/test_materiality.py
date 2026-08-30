@@ -1,3 +1,4 @@
+import json
 from datetime import date
 
 import materiality
@@ -105,3 +106,52 @@ def test_build_material_signal_marks_new_event_and_urgent_step_for_critical():
 
     assert signal["change_type"] == "new_event"
     assert signal["recommended_next_step"] == "urgent_strategic_assessment"
+
+
+def test_emit_event_appends_jsonl_envelope(tmp_path):
+    events_path = tmp_path / "events.jsonl"
+    material_signal = {
+        "signal_id": "SIG-2026-0001", "created_at": "2026-08-23T00:00:00+00:00",
+        "signal_type": "new_feature_demand", "summary": "Dark mode support: rising",
+        "confidence_label": "high", "materiality_label": "high",
+        "evidence_ids": ["EV-2026-000001", "EV-2026-000002"],
+    }
+
+    envelope = materiality.emit_event(material_signal, events_path=str(events_path))
+
+    assert envelope == {
+        "event": "product_intelligence.signal.material",
+        "event_version": "1.0",
+        "timestamp": "2026-08-23T00:00:00+00:00",
+        "signal": {
+            "signal_id": "SIG-2026-0001", "signal_type": "new_feature_demand",
+            "summary": "Dark mode support: rising", "confidence": "high", "materiality": "high",
+            "evidence_ids": ["EV-2026-000001", "EV-2026-000002"],
+        },
+    }
+
+    with open(events_path, "r", encoding="utf-8") as f:
+        lines = f.readlines()
+    assert json.loads(lines[0]) == envelope
+
+
+def test_emit_event_appends_without_truncating_existing_events(tmp_path):
+    events_path = tmp_path / "events.jsonl"
+    signal_one = {
+        "signal_id": "SIG-2026-0001", "created_at": "2026-08-23T00:00:00+00:00",
+        "signal_type": "new_feature_demand", "summary": "first", "confidence_label": "high",
+        "materiality_label": "high", "evidence_ids": ["EV-2026-000001"],
+    }
+    signal_two = {
+        "signal_id": "SIG-2026-0002", "created_at": "2026-08-30T00:00:00+00:00",
+        "signal_type": "new_feature_demand", "summary": "second", "confidence_label": "high",
+        "materiality_label": "high", "evidence_ids": ["EV-2026-000002"],
+    }
+
+    materiality.emit_event(signal_one, events_path=str(events_path))
+    materiality.emit_event(signal_two, events_path=str(events_path))
+
+    with open(events_path, "r", encoding="utf-8") as f:
+        lines = f.readlines()
+    assert len(lines) == 2
+    assert json.loads(lines[1])["signal"]["signal_id"] == "SIG-2026-0002"
