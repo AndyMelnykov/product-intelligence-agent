@@ -46,10 +46,11 @@ module and can also be run standalone.
 
 ```text
 run_weekly.py
-  └─> fetch.py    → evidence table
-  └─> extract.py  → signal_candidate table
-  └─> match.py    → canonical_topic + topic_weekly_mentions tables
-  └─> report.py   → data/reports/<week>.json, data/reports/<week>.csv
+  └─> fetch.py        → evidence table
+  └─> extract.py      → signal_candidate table
+  └─> match.py        → canonical_topic + topic_weekly_mentions tables
+  └─> report.py       → data/reports/<week>.json, data/reports/<week>.csv
+  └─> materiality.py  → material_signal table, data/events.jsonl
 ```
 
 - **fetch.py** — pulls new posts per subreddit via PRAW (official Reddit API wrapper),
@@ -61,12 +62,28 @@ run_weekly.py
   creates a new topic), incrementing per-week mention counts.
 - **report.py** — computes top topics by mention count and week-over-week trend
   (new / rising / stable / falling) from the database, same output format as before.
+- **materiality.py** — classifies each topic's this-week materiality (low / medium /
+  high / critical) from its trend, volume, confidence, and signal type; `high`/`critical`
+  topics get a `material_signal` row and a `product_intelligence.signal.material` event
+  appended to `data/events.jsonl`.
 
-Use `python query.py topic <slug>` or `python query.py search <keyword>` for ad hoc
-inspection of the database during development.
+Use `python query.py topic <slug>`, `python query.py search <keyword>`, or
+`python query.py signal <signal_id>` for ad hoc inspection of the database during
+development.
 
 Credentials (Reddit API + Anthropic API keys) are stored in the OS credential vault via
 `keyring` — never in a plaintext file, never committed to the repo.
+
+## Vision & roadmap
+
+This repo implements a slice of a larger product-intelligence-agent vision — see
+[docs/product-intelligence-agent-vision.md](docs/product-intelligence-agent-vision.md).
+Currently implemented: Reddit ingestion, customer-market signal extraction, canonical
+topic matching, deterministic trend detection, and materiality-gated event emission.
+Not yet implemented: additional Phase-1 sources (GitHub Issues, competitor changelogs,
+customer-interview summaries), the formal Integration API (section 11), scheduled/
+event-driven launch modes, the natural-language query interface, and the evaluation
+harness (section 14).
 
 ## Setup
 
