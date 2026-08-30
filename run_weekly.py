@@ -3,10 +3,11 @@ import argparse
 import extract
 import fetch
 import match
+import materiality
 import report
 from config import load_config
 
-STAGES = ["fetch", "extract", "match", "report"]
+STAGES = ["fetch", "extract", "match", "report", "materiality"]
 
 
 def run_all(config_path="config.yaml", today=None):
@@ -15,6 +16,7 @@ def run_all(config_path="config.yaml", today=None):
     extract.run(today=today)
     match.run(today=today)
     report.run(trend_window_weeks=config["trend_window_weeks"], today=today)
+    materiality.run(trend_window_weeks=config["trend_window_weeks"], today=today)
 
 
 def main():
@@ -36,6 +38,8 @@ def main():
         match.run()
     elif args.stage == "report":
         report.run(trend_window_weeks=config["trend_window_weeks"])
+    elif args.stage == "materiality":
+        materiality.run(trend_window_weeks=config["trend_window_weeks"])
 
 
 if __name__ == "__main__":
