@@ -24,6 +24,14 @@ def search_command(conn, keyword):
     print(json.dumps(results, indent=2))
 
 
+def signal_command(conn, signal_id):
+    signal = db.get_material_signal(conn, signal_id)
+    if signal is None:
+        print(f"no material signal found with id {signal_id!r}")
+        return
+    print(json.dumps(signal, indent=2))
+
+
 def main():
     parser = argparse.ArgumentParser(description="Ad hoc read-only queries against the product intelligence DB")
     parser.add_argument("--db-path", default="data/pi_agent.db")
@@ -35,6 +43,9 @@ def main():
     search_parser = subparsers.add_parser("search")
     search_parser.add_argument("keyword")
 
+    signal_parser = subparsers.add_parser("signal")
+    signal_parser.add_argument("signal_id")
+
     args = parser.parse_args()
     conn = db.connect(args.db_path)
     db.init_db(conn)
@@ -43,6 +54,8 @@ def main():
         topic_command(conn, args.slug)
     elif args.command == "search":
         search_command(conn, args.keyword)
+    elif args.command == "signal":
+        signal_command(conn, args.signal_id)
 
     conn.close()
 
