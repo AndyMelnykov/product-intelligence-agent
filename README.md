@@ -82,7 +82,7 @@ same trace is exercised by `tests/test_end_to_end.py` against fixture data.
 
 ## Architecture
 
-Four independent pipeline stages chained by a single entrypoint, backed by a SQLite
+Five independent pipeline stages chained by a single entrypoint, backed by a SQLite
 database (`data/pi_agent.db`) instead of flat JSON files. Each stage is a plain Python
 module and can also be run standalone.
 
@@ -111,6 +111,18 @@ run_weekly.py
 
 Credentials (Reddit API + Anthropic API keys) are stored in the OS credential vault via
 `keyring` — never in a plaintext file, never committed to the repo.
+
+**Provenance.** Each stage adds one clearly-labeled layer on top of the last, so it's
+always possible to tell what's raw, what's model output, and what's deterministic:
+
+```text
+evidence (source data, immutable)
+  └─ Claude classifies  → signal_candidate (model extraction)
+       └─ Claude matches → canonical_topic + weekly mentions (model extraction)
+            └─ report.py       → trend (deterministic)
+                 └─ materiality.py → material_signal (deterministic rule table)
+                      └─ downstream: human product decision (outside this repo)
+```
 
 ## Core workflows
 
@@ -291,7 +303,8 @@ matching, deterministic trend detection, and materiality-gated event emission.
 - **Additional Phase-1 sources** (GitHub Issues, competitor changelogs,
   customer-interview summaries). Why: the vision's Phase-1 scope is deliberately
   multi-source; Reddit alone under-represents structured issue feedback and competitor
-  intelligence.
+  intelligence. Design spec for the first of these:
+  [docs/superpowers/specs/2026-09-06-github-issues-source-design.md](docs/superpowers/specs/2026-09-06-github-issues-source-design.md).
 - **Integration API / MCP toolset** (`get_signal`, `get_evidence`,
   `search_related_signals`, `get_topic_trend`). Why: a Strategic Signals Agent needs a
   way to retrieve full evidence without depending on this repo's storage internals.
