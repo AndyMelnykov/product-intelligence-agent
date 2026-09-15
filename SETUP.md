@@ -151,7 +151,7 @@ If you ever need to re-run this (e.g. you rotated your Anthropic key), just run
 
 ## Step 7: Run the pipeline
 
-Run all four stages in sequence:
+Run all five stages in sequence:
 
 ```powershell
 python run_weekly.py
@@ -162,20 +162,21 @@ bad post). Afterward, a `data/` folder appears next to your code with:
 
 ```
 data/
-  state.json                       # last-seen post per subreddit
-  raw/2026-W33/yourproductname.json     # this week's raw fetched posts
-  extracted/2026-W33.json               # topics extracted by Claude
-  registry.json                         # all-time canonical topic registry
-  reports/2026-W33.json                 # this week's trend report
-  reports/2026-W33.csv                  # same report, as CSV
+  state.json             # last-seen post per subreddit
+  pi_agent.db            # SQLite database — evidence, extracted candidates, canonical
+                          # topics, weekly mention counts, and material signals
+  reports/2026-W33.json  # this week's trend report
+  reports/2026-W33.csv   # same report, as CSV
+  events.jsonl           # one line per material_signal event (only appended once a
+                          # topic crosses the materiality threshold — see README)
 ```
 
 Example contents of `reports/2026-W33.csv` after a few weeks of runs:
 
 ```
-id,canonical_name,category,mentions_this_week,total_mentions,trend
-t_a1b2c3d4,Dark mode support,feature_request,5,12,rising
-t_e5f6a7b8,Export to CSV,feature_request,2,2,new
+id,canonical_name,mentions_this_week,total_mentions,trend
+t_a1b2c3d4,Dark mode support,5,12,rising
+t_e5f6a7b8,Export to CSV,2,2,new
 ```
 
 **Run a single stage** — useful if you fixed a bug in matching and don't want to
@@ -185,8 +186,8 @@ re-fetch from Reddit:
 python run_weekly.py --stage match
 ```
 
-Valid values for `--stage` are `fetch`, `extract`, `match`, `report`, or `all` (the
-default).
+Valid values for `--stage` are `fetch`, `extract`, `match`, `report`, `materiality`, or
+`all` (the default).
 
 ## Troubleshooting
 
@@ -200,9 +201,10 @@ Your `config.yaml` is missing or has an empty `subreddits:` list. Revisit Step 5
 **PowerShell says the activation script is blocked**
 Run `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` (Step 2) and retry.
 
-**Nothing shows up under `data/raw/<week>/` for a subreddit**
+**`python query.py search <keyword>` returns nothing for a subreddit you just fetched**
 That subreddit had no new posts since the last run (or all of them were removed/
-deleted). This is normal on a fresh subreddit or after a very recent previous run.
+deleted). This is normal on a fresh subreddit or after a very recent previous run —
+check `data/state.json` to confirm the subreddit was reached.
 
 ## Scheduling a weekly run
 
