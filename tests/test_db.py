@@ -1,3 +1,4 @@
+import json
 import sqlite3
 
 import pytest
@@ -72,6 +73,38 @@ def test_insert_signal_candidate_rejects_unknown_evidence_id(conn):
         )
 
 
+def test_insert_signal_candidate_stores_entity_and_effective_date_when_provided(conn):
+    evidence_id = _insert_sample_evidence(conn)
+
+    candidate_id = db.insert_signal_candidate(
+        conn, evidence_id=evidence_id, signal_type="new_feature_demand", summary="s", confidence=0.9,
+        entity={"type": "competitor_product", "company": "Competitor X", "product": "Product Y"},
+        effective_date="2027-05-31",
+    )
+
+    row = conn.execute(
+        "SELECT entity, effective_date FROM signal_candidate WHERE candidate_id = ?", (candidate_id,)
+    ).fetchone()
+    assert json.loads(row["entity"]) == {
+        "type": "competitor_product", "company": "Competitor X", "product": "Product Y",
+    }
+    assert row["effective_date"] == "2027-05-31"
+
+
+def test_insert_signal_candidate_defaults_entity_and_effective_date_to_none(conn):
+    evidence_id = _insert_sample_evidence(conn)
+
+    candidate_id = db.insert_signal_candidate(
+        conn, evidence_id=evidence_id, signal_type="new_feature_demand", summary="s", confidence=0.9,
+    )
+
+    row = conn.execute(
+        "SELECT entity, effective_date FROM signal_candidate WHERE candidate_id = ?", (candidate_id,)
+    ).fetchone()
+    assert row["entity"] is None
+    assert row["effective_date"] is None
+
+
 def test_get_evidence_without_candidate_excludes_processed_rows(conn):
     processed = _insert_sample_evidence(conn)
     pending = _insert_sample_evidence(conn, title="A second post")
@@ -82,6 +115,27 @@ def test_get_evidence_without_candidate_excludes_processed_rows(conn):
     remaining = db.get_evidence_without_candidate(conn)
 
     assert [e["evidence_id"] for e in remaining] == [pending]
+
+
+def test_get_candidates_without_topic_round_trips_entity_and_effective_date(conn):
+    evidence_id = _insert_sample_evidence(conn)
+    db.insert_signal_candidate(
+        conn, evidence_id=evidence_id, signal_type="product_end_of_support", summary="s", confidence=0.95,
+        entity={"type": "competitor_product", "company": "Competitor X", "product": "Product Y"},
+        effective_date="2027-05-31",
+    )
+    db.insert_signal_candidate(
+        conn, evidence_id=evidence_id, signal_type="new_feature_demand", summary="s2", confidence=0.8,
+    )
+
+    candidates = db.get_candidates_without_topic(conn)
+
+    assert candidates[0]["entity"] == {
+        "type": "competitor_product", "company": "Competitor X", "product": "Product Y",
+    }
+    assert candidates[0]["effective_date"] == "2027-05-31"
+    assert candidates[1]["entity"] is None
+    assert candidates[1]["effective_date"] is None
 
 
 def test_insert_canonical_topic_returns_sequential_ids_without_year(conn):
