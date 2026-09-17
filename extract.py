@@ -32,6 +32,10 @@ Respond with ONLY a JSON object with these exact keys:
 - "signal_type": one of {signal_types}
 - "summary": a one-line description of what's being said
 - "confidence": a number between 0.0 and 1.0 for how confident you are in this classification
+- "entity": an object {{"type": ..., "company": ..., "product": ...}} identifying the specific \
+company or product this signal is about, or null if the post does not name one
+- "effective_date": an ISO date ("YYYY-MM-DD") if the post states a specific effective date for a \
+change (e.g. an end-of-support date), or null otherwise
 
 If the post is not meaningful product feedback (spam, off-topic, low-effort, or clearly \
 AI-generated filler), respond with exactly: {{"skip": true}}
@@ -77,7 +81,13 @@ def extract_topic(client, evidence: dict):
     if parsed["signal_type"] not in SIGNAL_TYPES:
         raise ExtractionError(f"evidence {evidence['evidence_id']}: invalid signal_type {parsed['signal_type']!r}")
 
-    return {"signal_type": parsed["signal_type"], "summary": parsed["summary"], "confidence": parsed["confidence"]}
+    return {
+        "signal_type": parsed["signal_type"],
+        "summary": parsed["summary"],
+        "confidence": parsed["confidence"],
+        "entity": parsed.get("entity"),
+        "effective_date": parsed.get("effective_date"),
+    }
 
 
 def run(db_path="data/pi_agent.db", today=None, client=None):
@@ -100,6 +110,8 @@ def run(db_path="data/pi_agent.db", today=None, client=None):
                     signal_type=result["signal_type"],
                     summary=result["summary"],
                     confidence=result["confidence"],
+                    entity=result["entity"],
+                    effective_date=result["effective_date"],
                 )
     except Exception:
         conn.rollback()

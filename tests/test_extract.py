@@ -53,7 +53,26 @@ def test_extract_topic_parses_valid_response():
 
     result = extract.extract_topic(client, SAMPLE_EVIDENCE)
 
-    assert result == {"signal_type": "new_feature_demand", "summary": "User wants a dark theme", "confidence": 0.9}
+    assert result == {
+        "signal_type": "new_feature_demand", "summary": "User wants a dark theme", "confidence": 0.9,
+        "entity": None, "effective_date": None,
+    }
+
+
+def test_extract_topic_parses_entity_and_effective_date_when_present():
+    client = FakeClient([
+        json.dumps({
+            "signal_type": "competitor_mention_rising", "summary": "Users comparing to Competitor X",
+            "confidence": 0.8,
+            "entity": {"type": "competitor_product", "company": "Competitor X", "product": "Product Y"},
+            "effective_date": "2027-05-31",
+        })
+    ])
+
+    result = extract.extract_topic(client, SAMPLE_EVIDENCE)
+
+    assert result["entity"] == {"type": "competitor_product", "company": "Competitor X", "product": "Product Y"}
+    assert result["effective_date"] == "2027-05-31"
 
 
 def test_extract_topic_returns_none_on_skip_flag():
@@ -114,3 +133,37 @@ def test_run_creates_candidates_for_pending_evidence_and_skips_bad_ones(tmp_path
     conn.close()
 
     assert [dict(r) for r in rows] == [{"evidence_id": good_id, "signal_type": "new_feature_demand", "summary": "s"}]
+
+
+def test_run_persists_entity_and_effective_date_from_extraction(tmp_path):
+    db_path = tmp_path / "pi_agent.db"
+    conn = db.connect(str(db_path))
+    db.init_db(conn)
+    evidence_id = db.insert_evidence(
+        conn, source_type="reddit_post", source_name="sub", source_url="/c",
+        captured_at="2026-08-15T00:00:00+00:00", published_at="2026-08-14T00:00:00+00:00",
+        title="Competitor X sunsetting Product Y", content="body", metadata={},
+    )
+    conn.commit()
+    conn.close()
+
+    client = FakeClient([
+        json.dumps({
+            "signal_type": "competitor_mention_rising", "summary": "s", "confidence": 0.9,
+            "entity": {"type": "competitor_product", "company": "Competitor X", "product": "Product Y"},
+            "effective_date": "2027-05-31",
+        }),
+    ])
+
+    extract.run(db_path=str(db_path), today=date(2026, 8, 15), client=client)
+
+    conn = db.connect(str(db_path))
+    row = conn.execute(
+        "SELECT entity, effective_date FROM signal_candidate WHERE evidence_id = ?", (evidence_id,)
+    ).fetchone()
+    conn.close()
+
+    assert json.loads(row["entity"]) == {
+        "type": "competitor_product", "company": "Competitor X", "product": "Product Y",
+    }
+    assert row["effective_date"] == "2027-05-31"

@@ -99,7 +99,9 @@ run_weekly.py
   storing each as an immutable `evidence` row.
 - **extract.py** — classifies each not-yet-processed evidence row into a `signal_type`
   (from the product intelligence signal taxonomy) plus a confidence score, storing it as
-  a `signal_candidate`.
+  a `signal_candidate`. Also captures an optional `entity` and `effective_date` when the
+  source text names one (currently unused downstream — Reddit posts rarely name one, and
+  no source that would need it, like competitor changelogs, exists yet).
 - **match.py** — matches new candidates against the `canonical_topic` registry (or
   creates a new topic), incrementing per-week mention counts.
 - **report.py** — computes top topics by mention count and week-over-week trend
