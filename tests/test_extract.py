@@ -75,6 +75,20 @@ def test_extract_topic_parses_entity_and_effective_date_when_present():
     assert result["effective_date"] == "2027-05-31"
 
 
+def test_extract_topic_coerces_non_dict_entity_to_none():
+    client = FakeClient([
+        json.dumps({
+            "signal_type": "competitor_mention_rising", "summary": "Users comparing to Competitor X",
+            "confidence": 0.8,
+            "entity": "Competitor X",
+        })
+    ])
+
+    result = extract.extract_topic(client, SAMPLE_EVIDENCE)
+
+    assert result["entity"] is None
+
+
 def test_extract_topic_returns_none_on_skip_flag():
     client = FakeClient([json.dumps({"skip": True})])
 

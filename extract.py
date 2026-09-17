@@ -59,7 +59,7 @@ def extract_topic(client, evidence: dict):
     try:
         response = client.messages.create(
             model=EXTRACTION_MODEL,
-            max_tokens=300,
+            max_tokens=500,
             messages=[{"role": "user", "content": prompt}],
         )
         raw_text = response.content[0].text
@@ -81,11 +81,12 @@ def extract_topic(client, evidence: dict):
     if parsed["signal_type"] not in SIGNAL_TYPES:
         raise ExtractionError(f"evidence {evidence['evidence_id']}: invalid signal_type {parsed['signal_type']!r}")
 
+    entity = parsed.get("entity")
     return {
         "signal_type": parsed["signal_type"],
         "summary": parsed["summary"],
         "confidence": parsed["confidence"],
-        "entity": parsed.get("entity"),
+        "entity": entity if isinstance(entity, dict) else None,
         "effective_date": parsed.get("effective_date"),
     }
 
