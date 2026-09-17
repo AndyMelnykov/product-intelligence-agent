@@ -206,6 +206,14 @@ That subreddit had no new posts since the last run (or all of them were removed/
 deleted). This is normal on a fresh subreddit or after a very recent previous run —
 check `data/state.json` to confirm the subreddit was reached.
 
+**`sqlite3.OperationalError: table signal_candidate has no column named entity` (or
+similar "has no column named" error)**
+Your local `data/pi_agent.db` predates a schema change on this branch. `db.py`'s
+`SCHEMA_SQL` uses `CREATE TABLE IF NOT EXISTS`, so it never alters an existing table —
+there's no migration machinery in this codebase, by design (`data/` is gitignored and
+dev-only). Delete `data/pi_agent.db` and re-run `python run_weekly.py` to rebuild the
+database from scratch with the current schema.
+
 ## Scheduling a weekly run
 
 To automate this, create a Windows Task Scheduler task that runs
