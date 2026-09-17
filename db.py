@@ -32,7 +32,9 @@ CREATE TABLE IF NOT EXISTS signal_candidate (
   signal_type TEXT NOT NULL,
   topic_id TEXT REFERENCES canonical_topic(topic_id),
   summary TEXT NOT NULL,
-  confidence REAL NOT NULL
+  confidence REAL NOT NULL,
+  entity TEXT,
+  effective_date TEXT
 );
 
 CREATE TABLE IF NOT EXISTS topic_weekly_mentions (
@@ -98,6 +100,12 @@ def _topic_row_to_dict(row):
     return d
 
 
+def _signal_candidate_row_to_dict(row):
+    d = dict(row)
+    d["entity"] = json.loads(d["entity"]) if d["entity"] is not None else None
+    return d
+
+
 def insert_evidence(conn, *, source_type, source_name, source_url, captured_at,
                      published_at, title, content, metadata):
     year = captured_at[:4]
@@ -133,16 +141,18 @@ def get_evidence_for_topic(conn, topic_id):
     return [_evidence_row_to_dict(r) for r in rows]
 
 
-def insert_signal_candidate(conn, *, evidence_id, signal_type, summary, confidence, topic_id=None):
+def insert_signal_candidate(conn, *, evidence_id, signal_type, summary, confidence, topic_id=None,
+                             entity=None, effective_date=None):
     evidence = get_evidence(conn, evidence_id)
     if evidence is None:
         raise DBError(f"cannot create signal_candidate: evidence {evidence_id} does not exist")
     year = evidence["captured_at"][:4]
     candidate_id = _next_sequence_id(conn, "signal_candidate", "candidate_id", f"SC-{year}-", 5)
     conn.execute(
-        "INSERT INTO signal_candidate (candidate_id, evidence_id, signal_type, topic_id, summary, confidence) "
-        "VALUES (?, ?, ?, ?, ?, ?)",
-        (candidate_id, evidence_id, signal_type, topic_id, summary, confidence),
+        "INSERT INTO signal_candidate (candidate_id, evidence_id, signal_type, topic_id, summary, "
+        "confidence, entity, effective_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (candidate_id, evidence_id, signal_type, topic_id, summary, confidence,
+         json.dumps(entity, sort_keys=True) if entity is not None else None, effective_date),
     )
     return candidate_id
 
@@ -155,7 +165,7 @@ def get_candidates_without_topic(conn):
     rows = conn.execute(
         "SELECT * FROM signal_candidate WHERE topic_id IS NULL ORDER BY candidate_id"
     ).fetchall()
-    return [dict(r) for r in rows]
+    return [_signal_candidate_row_to_dict(r) for r in rows]
 
 
 def get_canonical_topics(conn):
