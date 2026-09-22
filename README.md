@@ -1,28 +1,41 @@
-# feedback-reddit-parser
+# product-intelligence-agent
 
-Automatically surface what people are saying about your product on Reddit — without
-having to read every thread yourself.
+Continuously turn fragmented customer, competitor, and market evidence into structured,
+trend-aware product signals — so a real signal doesn't stay invisible just because
+nobody happened to read the right thread.
 
 ## Problem
 
-Customers and potential customers talk about your product on Reddit, but that feedback
-is scattered across subreddits, buried in comment threads, and easy to miss. Manually
-reading every thread doesn't scale, and a lot of what's there is noise: AI-generated
-replies, off-topic chatter, low-effort comments that don't say anything useful.
+Product teams get useful evidence from many places — Reddit threads, GitHub issues,
+app-store reviews, competitor changelogs, customer interviews — but that evidence is
+fragmented, repetitive, noisy, and hard to compare over time. Manually reading
+everything doesn't scale, and a lot of what's there is noise: AI-generated replies,
+off-topic chatter, low-effort comments that don't say anything useful.
 
 A one-off scrape doesn't help either — the same complaint showing up in five separate
 threads over two months looks like five unrelated mentions unless something is tracking
-it as one recurring topic.
+it as one recurring topic, and a real signal (a competitor sunsetting a product, a
+regulatory deadline) is easy to miss entirely if it only ever shows up once.
+
+Today this repo implements the first slice of that problem end-to-end: Reddit as a
+source, and the customer-market half of the signal taxonomy (complaints, feature
+requests, usability/reliability issues, pricing, switching intent — see
+[Limitations](#limitations) for what's out of reach until more sources exist). The
+evidence → extract → match → trend → materiality pipeline itself is source-agnostic by
+design — see [Vision & roadmap](#vision--roadmap) for the fuller multi-source vision and
+[the gap-analysis doc](docs/product-intelligence-agent-gap-analysis.md) for exactly
+where implementation stands against it.
 
 ## Product
 
 A weekly pipeline that:
 
-1. **Collects** — pulls new posts from a configured list of subreddits via the official
-   Reddit API.
-2. **Extracts signal** — uses Claude to pull out the actual topic from each post
-   (feature request, complaint, praise, question, competitor comparison), filtering out
-   AI slop and irrelevant noise.
+1. **Collects** — pulls new evidence from configured sources via each source's API
+   (today: Reddit, from a configured list of subreddits, via the official Reddit API).
+2. **Extracts signal** — uses Claude to pull out the actual topic from each piece of
+   evidence (feature request, complaint, praise, question, competitor comparison), plus
+   an optional structured entity (company/product) and effective date when the source
+   text names one, filtering out AI slop and irrelevant noise.
 3. **Amplifies** — matches new topics against a running registry of canonical topics, so
    a subject that keeps coming back across threads, gets more comments, or attracts more
    upvotes shows up as a stronger, growing signal rather than a one-off mention.
@@ -35,8 +48,9 @@ The result is an ongoing, low-effort read on what your product's community actua
 about, instead of anecdotal impressions from whichever thread you happened to see.
 
 **Status:** implemented — see [Vision & roadmap](#vision--roadmap) for what's built vs.
-planned, and [docs/superpowers/](docs/superpowers/) for the design specs and
-implementation plans behind each stage.
+planned, [the gap-analysis doc](docs/product-intelligence-agent-gap-analysis.md) for a
+detailed spec-vs-code comparison, and [docs/superpowers/](docs/superpowers/) for the
+design specs and implementation plans behind each stage.
 
 ## Demo
 
@@ -276,6 +290,18 @@ pytest -v
   layer yet (see [Context strategy](#context-strategy)).
 - **Single source.** Only Reddit is implemented. GitHub Issues, competitor changelogs,
   and customer-interview summaries from the wider vision are not built.
+- **Only the customer-market signal taxonomy is reachable.** `extract.py`'s
+  `SIGNAL_TYPES` covers 12 of the ~50 signal types the full vision defines (complaints,
+  feature requests, usability/reliability issues, pricing, switching intent, and
+  similar). The Competitive/Technology/Regulatory/Ecosystem taxonomies exist only as
+  dead constants in `materiality.py` (`EVENT_DRIVEN_HIGH_SIGNAL_TYPES`,
+  `EVENT_DRIVEN_CRITICAL_SIGNAL_TYPES`) — no source can produce a candidate with those
+  types until a competitor-changelog, regulatory-feed, or similar source is added. The
+  `entity`/`effective_date` fields on `signal_candidate` were built for this case ahead
+  of the source that needs them, and sit unused today.
+- **Trend engine implements 4 of 7 states.** `report.py` detects `new` / `rising` /
+  `stable` / `falling`; the vision's `sharply_rising`, `resurfacing`, and `dormant`
+  states aren't implemented.
 - **No scheduled or event-driven execution.** The pipeline only runs when manually
   invoked (`run_weekly.py`, or an OS task scheduler calling it) — there's no built-in
   scheduler or webhook-triggered mode.
@@ -292,28 +318,38 @@ pytest -v
 This repo implements a slice of a larger product-intelligence-agent vision — see
 [docs/product-intelligence-agent-vision.md](docs/product-intelligence-agent-vision.md).
 
-**Implemented:** Reddit ingestion, customer-market signal extraction, canonical topic
-matching, deterministic trend detection, and materiality-gated event emission.
+**Implemented:** Reddit ingestion, customer-market signal extraction (with optional
+entity/effective-date capture), canonical topic matching, deterministic trend detection,
+and materiality-gated event emission.
 
-**Next, in rough priority order:**
+**Next, in rough priority order** (matches the phased roadmap in
+[the gap-analysis doc](docs/product-intelligence-agent-gap-analysis.md)):
 
-- **Evaluation harness** (signal-type accuracy, topic-matching false-merge rate,
-  materiality precision against labeled examples). Why: confidence in classification
-  quality currently rests on test fixtures with known-correct responses, not measured
-  accuracy against real, ambiguous input — the biggest unverified assumption in the
-  system.
+- **Evaluation harness** (signal-type accuracy, entity/date extraction accuracy,
+  topic-matching false-merge rate, materiality precision against labeled examples). Why:
+  confidence in classification quality currently rests on test fixtures with
+  known-correct responses, not measured accuracy against real, ambiguous input — the
+  biggest unverified assumption in the system.
 - **Additional Phase-1 sources** (GitHub Issues, competitor changelogs,
   customer-interview summaries). Why: the vision's Phase-1 scope is deliberately
   multi-source; Reddit alone under-represents structured issue feedback and competitor
-  intelligence. Design spec for the first of these:
+  intelligence, and can't reach the Competitive/Technology/Regulatory/Ecosystem signal
+  types described in [Limitations](#limitations) — a competitor-changelog source is also
+  what would actually exercise the `entity`/`effective_date` fields already in the
+  schema. Design spec for the first of these (GitHub Issues):
   [docs/superpowers/specs/2026-09-06-github-issues-source-design.md](docs/superpowers/specs/2026-09-06-github-issues-source-design.md).
+- **Trend engine completeness** (`sharply_rising`, `resurfacing`, `dormant`, on top of
+  the 4 states `report.py` already computes). Why: small and purely deterministic, but
+  needed before trend output matches the vision's full state machine.
 - **Integration API / MCP toolset** (`get_signal`, `get_evidence`,
-  `search_related_signals`, `get_topic_trend`). Why: a Strategic Signals Agent needs a
-  way to retrieve full evidence without depending on this repo's storage internals.
+  `search_related_signals`, `get_topic_trend`, `search_feedback`). Why: a Strategic
+  Signals Agent needs a way to retrieve full evidence without depending on this repo's
+  storage internals.
 - **Scheduled/event-driven launch modes.** Why: a real deployment needs the pipeline
   running on its own cadence, not only when someone remembers to invoke it.
 - **Natural-language query interface.** Why: source-backed answers to ad hoc questions
-  are currently only reachable by hand-writing SQL via `query.py`.
+  are currently only reachable by hand-writing SQL via `query.py`; likely close to free
+  once the Integration API/MCP toolset exists.
 
 ## Reddit API compliance
 
