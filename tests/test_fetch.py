@@ -1,5 +1,4 @@
 import json
-import os
 from datetime import date
 
 import prawcore
@@ -57,16 +56,16 @@ class FakeRedditClient:
 
 
 def make_submission(fullname, **overrides):
-    defaults = dict(
-        fullname=fullname,
-        id=fullname.split("_")[1],
-        title="A title",
-        selftext="Some body text",
-        permalink=f"/r/test/comments/{fullname}",
-        score=10,
-        num_comments=2,
-        created_utc=1700000000.0,
-    )
+    defaults = {
+        "fullname": fullname,
+        "id": fullname.split("_")[1],
+        "title": "A title",
+        "selftext": "Some body text",
+        "permalink": f"/r/test/comments/{fullname}",
+        "score": 10,
+        "num_comments": 2,
+        "created_utc": 1700000000.0,
+    }
     defaults.update(overrides)
     return FakeSubmission(**defaults)
 

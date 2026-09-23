@@ -1,5 +1,4 @@
 import json
-import sqlite3
 
 import pytest
 
@@ -15,13 +14,13 @@ def conn():
 
 
 def _insert_sample_evidence(conn, **overrides):
-    defaults = dict(
-        source_type="reddit_post", source_name="yourproductname",
-        source_url="https://reddit.com/r/example/comments/abc",
-        captured_at="2026-08-15T00:00:00+00:00", published_at="2026-08-14T10:00:00+00:00",
-        title="Please add dark mode", content="Would love a dark theme",
-        metadata={"score": 10, "num_comments": 2},
-    )
+    defaults = {
+        "source_type": "reddit_post", "source_name": "yourproductname",
+        "source_url": "https://reddit.com/r/example/comments/abc",
+        "captured_at": "2026-08-15T00:00:00+00:00", "published_at": "2026-08-14T10:00:00+00:00",
+        "title": "Please add dark mode", "content": "Would love a dark theme",
+        "metadata": {"score": 10, "num_comments": 2},
+    }
     defaults.update(overrides)
     return db.insert_evidence(conn, **defaults)
 
@@ -171,7 +170,7 @@ def test_get_candidates_without_topic_excludes_matched_rows(conn):
         conn, slug="dark-mode-support", name="Dark mode support", description="d",
         aliases=[], first_seen="2026-W30", last_seen="2026-W30",
     )
-    matched = db.insert_signal_candidate(
+    db.insert_signal_candidate(
         conn, evidence_id=evidence_id, signal_type="new_feature_demand",
         summary="s", confidence=0.8, topic_id=topic_id,
     )
