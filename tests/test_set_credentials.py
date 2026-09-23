@@ -1,5 +1,5 @@
-import set_credentials
 import credentials
+import set_credentials
 
 
 def test_main_sets_every_required_key(monkeypatch):

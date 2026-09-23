@@ -2,7 +2,7 @@ import getpass
 
 import keyring
 
-from credentials import SERVICE, REQUIRED_KEYS
+from credentials import REQUIRED_KEYS, SERVICE
 
 
 def main():
