@@ -95,27 +95,58 @@ def test_extract_topic_returns_none_on_skip_flag():
     assert extract.extract_topic(client, SAMPLE_EVIDENCE) is None
 
 
-def test_extract_topic_raises_on_invalid_signal_type():
+def test_extract_topic_raises_response_error_on_invalid_signal_type():
     client = FakeClient([
         json.dumps({"signal_type": "not_a_real_type", "summary": "y", "confidence": 0.5})
     ])
 
-    with pytest.raises(extract.ExtractionError):
+    with pytest.raises(extract.ExtractionResponseError):
         extract.extract_topic(client, SAMPLE_EVIDENCE)
 
 
-def test_extract_topic_raises_on_malformed_json():
+def test_extract_topic_raises_response_error_on_malformed_json():
     client = FakeClient(["not json at all"])
 
-    with pytest.raises(extract.ExtractionError):
+    with pytest.raises(extract.ExtractionResponseError):
         extract.extract_topic(client, SAMPLE_EVIDENCE)
 
 
-def test_extract_topic_raises_on_api_error():
+def test_extract_topic_raises_response_error_on_missing_keys():
+    client = FakeClient([json.dumps({"signal_type": "new_feature_demand"})])
+
+    with pytest.raises(extract.ExtractionResponseError):
+        extract.extract_topic(client, SAMPLE_EVIDENCE)
+
+
+def test_extract_topic_raises_api_error_on_api_failure():
     client = FakeClient([RuntimeError("rate limited")])
 
-    with pytest.raises(extract.ExtractionError):
+    with pytest.raises(extract.ExtractionAPIError):
         extract.extract_topic(client, SAMPLE_EVIDENCE)
+
+
+def test_extraction_error_subclasses_share_base_class():
+    assert issubclass(extract.ExtractionAPIError, extract.ExtractionError)
+    assert issubclass(extract.ExtractionResponseError, extract.ExtractionError)
+
+
+def test_extract_topic_parses_evidence_without_evidence_id():
+    client = FakeClient([
+        json.dumps({"signal_type": "new_feature_demand", "summary": "User wants a dark theme", "confidence": 0.9})
+    ])
+    evidence = {"title": "Would love dark mode", "content": "Please add a dark theme."}
+
+    result = extract.extract_topic(client, evidence)
+
+    assert result["signal_type"] == "new_feature_demand"
+
+
+def test_extract_topic_raises_extraction_error_not_key_error_without_evidence_id():
+    client = FakeClient(["not json at all"])
+    evidence = {"title": "Would love dark mode", "content": "Please add a dark theme."}
+
+    with pytest.raises(extract.ExtractionResponseError):
+        extract.extract_topic(client, evidence)
 
 
 def test_run_creates_candidates_for_pending_evidence_and_skips_bad_ones(tmp_path):

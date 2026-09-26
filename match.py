@@ -36,6 +36,14 @@ class MatchError(Exception):
     pass
 
 
+class MatchAPIError(MatchError):
+    """The API call itself failed (rate limit, network, etc.) -- not a model mistake."""
+
+
+class MatchResponseError(MatchError):
+    """The model responded, but the response was not valid JSON."""
+
+
 def build_matching_prompt(candidates, existing_topics):
     existing_summary = [
         {"topic_id": t["topic_id"], "name": t["name"], "description": t["description"]}
@@ -51,7 +59,7 @@ def build_matching_prompt(candidates, existing_topics):
     )
 
 
-def _call_matcher(client, candidates, existing_topics):
+def call_matcher(client, candidates, existing_topics):
     if not candidates:
         return []
 
@@ -62,9 +70,14 @@ def _call_matcher(client, candidates, existing_topics):
             max_tokens=1500,
             messages=[{"role": "user", "content": prompt}],
         )
-        return json.loads(response.content[0].text)
+        raw_text = response.content[0].text
     except Exception as e:
-        raise MatchError(f"matching call failed: {e}") from e
+        raise MatchAPIError(f"matching call failed: {e}") from e
+
+    try:
+        return json.loads(raw_text)
+    except json.JSONDecodeError as e:
+        raise MatchResponseError(f"matching call returned non-JSON response: {raw_text!r}") from e
 
 
 def apply_matches(conn, candidates, decisions, week):
@@ -102,7 +115,7 @@ def run(db_path="data/pi_agent.db", today=None, client=None):
     try:
         candidates = db.get_candidates_without_topic(conn)
         existing_topics = db.get_canonical_topics(conn)
-        decisions = _call_matcher(client, candidates, existing_topics)
+        decisions = call_matcher(client, candidates, existing_topics)
         apply_matches(conn, candidates, decisions, week)
     except Exception:
         conn.rollback()

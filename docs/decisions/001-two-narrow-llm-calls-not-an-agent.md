@@ -23,7 +23,7 @@ persistent conversation state to maintain across a task.
   different cadences — combining them would force one call to wait on the other
   unnecessarily.
 - **Two narrow, stateless calls** (chosen): `extract_topic()` takes one evidence row and
-  returns a fixed-shape JSON object; `_call_matcher()` takes a batch of candidates plus
+  returns a fixed-shape JSON object; `call_matcher()` takes a batch of candidates plus
   the registry and returns one decision per candidate. Each has a fixed prompt template
   and a validated response contract.
 

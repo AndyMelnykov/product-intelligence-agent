@@ -34,20 +34,22 @@ evals/
     extraction/
       database_development.yaml   # one file per product area
     matching/
-      dark_mode_duplicate.yaml    # one file per scenario
+      connection_pooling_duplicate.yaml    # one file per scenario
   harness.py                      # golden-set loading, grading, aggregation
   judge.py                        # LLM-as-judge for the extraction summary field
   run_extraction_eval.py          # CLI entry point
   run_matching_eval.py            # CLI entry point
 ```
 
-Both runners call the actual production code (`extract.extract_topic`,
-`match.build_matching_prompt` + the matcher call in `match.py`) against a real
-`anthropic.Anthropic()` client, obtained the same way production does — via
+Both runners call the actual production code (`extract.extract_topic` and
+`match.call_matcher`, which builds its prompt via `match.build_matching_prompt`) against a
+real `anthropic.Anthropic()` client, obtained the same way production does — via
 `credentials.get_secret("anthropic_api_key")`. This is deliberate: the eval exercises the
-real prompt text and real parsing logic, not a reimplementation of it. Nothing in
-`extract.py` or `match.py` needs to change to support this — the eval suite is a new
-consumer of their existing public functions.
+real prompt text and real parsing logic, not a reimplementation of it. The eval suite is a
+new consumer of these public functions; the small production-side changes it needed
+(`call_matcher` made public, `extract_topic` tolerating evidence without an
+`evidence_id`, and API vs. response failures raised as distinct exception types) are
+already in place.
 
 ### `evals/harness.py`
 
@@ -55,11 +57,13 @@ consumer of their existing public functions.
   validates each against the expected schema, raises immediately with the offending
   file/example id on a schema violation.
 - `grade_extraction_example(example, client) -> ExampleResult` — calls
-  `extract.extract_topic(client, example.evidence)`, exact-matches `skip`, `signal_type`,
+  `extract.extract_topic(client, {**example.evidence, "evidence_id": example.id})` (the
+  example id is passed as `evidence_id` so any extraction error names the golden example),
+  exact-matches `skip`, `signal_type`,
   `entity`, `effective_date` against `example.expected`, and delegates the `summary`
   field to `judge.judge_summary(...)`.
 - `grade_matching_scenario(scenario, client) -> ExampleResult` — builds candidates/
-  existing-topics from the scenario, runs them through `match.py`'s matcher, exact-matches
+  existing-topics from the scenario, runs them through `match.call_matcher`, exact-matches
   each candidate's `matched_topic_id`/`new_topic` against `scenario.expected`.
 - `aggregate(results) -> Report` — per-field accuracy, a confusion matrix for
   `signal_type` misses, overall judge pass rate, and the list of individual failures
@@ -77,7 +81,7 @@ consumer of their existing public functions.
 ### CLI entry points
 
 - `python evals/run_extraction_eval.py [--filter database_development]`
-- `python evals/run_matching_eval.py [--filter dark_mode_duplicate]`
+- `python evals/run_matching_eval.py [--filter connection_pooling_duplicate]`
 
 `--filter` matches on the golden file's basename (extraction) or scenario `name`
 (matching), so you can re-run just the set you're iterating on instead of the whole
@@ -118,10 +122,10 @@ examples:
 When `expected.skip` is `true`, no other `expected` fields or `reference_summary` are
 required — grading stops at the skip check.
 
-**Matching** (`evals/golden/matching/dark_mode_duplicate.yaml`):
+**Matching** (`evals/golden/matching/connection_pooling_duplicate.yaml`):
 
 ```yaml
-name: dark_mode_duplicate
+name: connection_pooling_duplicate
 existing_topics:
   - topic_id: TOPIC-0001
     name: "Connection pooling exhaustion under load"
@@ -156,7 +160,13 @@ since a malformed golden example is a bug in the eval data itself, not a model r
 
 - A per-example API error (rate limit, transient failure) is caught, logged, and the
   example is marked `errored` — distinct from `failed` — so one flaky call doesn't
-  invalidate the run or get miscounted as a model mistake.
+  invalidate the run or get miscounted as a model mistake. The production code signals
+  this distinction by exception type: `extract.ExtractionAPIError` / `match.MatchAPIError`
+  mean the call itself failed → `errored`; `extract.ExtractionResponseError` /
+  `match.MatchResponseError` mean the model answered but the answer was unusable
+  (non-JSON, missing keys, invalid `signal_type`) → `failed`, since that is a model
+  mistake the eval should count. Both subclass the existing `ExtractionError` /
+  `MatchError`, so production callers that catch the base class are unaffected.
 - Malformed golden YAML (missing required key, invalid `signal_type`, bad shape) fails
   fast at load time with the file name and example id in the error, before any API calls
   are made — no point spending API budget on a run that can't be graded.
