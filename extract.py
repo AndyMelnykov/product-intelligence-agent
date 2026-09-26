@@ -46,6 +46,14 @@ class ExtractionError(Exception):
     pass
 
 
+class ExtractionAPIError(ExtractionError):
+    """The API call itself failed (rate limit, network, etc.) -- not a model mistake."""
+
+
+class ExtractionResponseError(ExtractionError):
+    """The model responded, but the response was unusable (non-JSON, missing keys, bad signal_type)."""
+
+
 def build_extraction_prompt(evidence: dict) -> str:
     return EXTRACTION_PROMPT_TEMPLATE.format(
         title=evidence["title"], content=evidence["content"],
@@ -55,6 +63,7 @@ def build_extraction_prompt(evidence: dict) -> str:
 
 def extract_topic(client, evidence: dict):
     prompt = build_extraction_prompt(evidence)
+    evidence_label = evidence.get("evidence_id", "<no evidence_id>")
 
     try:
         response = client.messages.create(
@@ -64,22 +73,22 @@ def extract_topic(client, evidence: dict):
         )
         raw_text = response.content[0].text
     except Exception as e:
-        raise ExtractionError(f"evidence {evidence['evidence_id']}: API call failed: {e}") from e
+        raise ExtractionAPIError(f"evidence {evidence_label}: API call failed: {e}") from e
 
     try:
         parsed = json.loads(raw_text)
     except json.JSONDecodeError as e:
-        raise ExtractionError(f"evidence {evidence['evidence_id']}: non-JSON response: {raw_text!r}") from e
+        raise ExtractionResponseError(f"evidence {evidence_label}: non-JSON response: {raw_text!r}") from e
 
     if parsed.get("skip"):
         return None
 
     missing = {"signal_type", "summary", "confidence"} - parsed.keys()
     if missing:
-        raise ExtractionError(f"evidence {evidence['evidence_id']}: response missing keys {missing}")
+        raise ExtractionResponseError(f"evidence {evidence_label}: response missing keys {missing}")
 
     if parsed["signal_type"] not in SIGNAL_TYPES:
-        raise ExtractionError(f"evidence {evidence['evidence_id']}: invalid signal_type {parsed['signal_type']!r}")
+        raise ExtractionResponseError(f"evidence {evidence_label}: invalid signal_type {parsed['signal_type']!r}")
 
     entity = parsed.get("entity")
     return {

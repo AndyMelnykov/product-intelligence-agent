@@ -1,5 +1,41 @@
+import json
+
+import pytest
+
 import db
 import match
+
+
+class FakeContentBlock:
+    def __init__(self, text):
+        self.text = text
+
+
+class FakeResponse:
+    def __init__(self, text):
+        self.content = [FakeContentBlock(text)]
+
+
+class FakeMessages:
+    def __init__(self, responses):
+        self._responses = list(responses)
+
+    def create(self, **kwargs):
+        result = self._responses.pop(0)
+        if isinstance(result, Exception):
+            raise result
+        return FakeResponse(result)
+
+
+class FakeClient:
+    def __init__(self, responses):
+        self.messages = FakeMessages(responses)
+
+
+EXISTING_TOPICS = [
+    {"topic_id": "TOPIC-0001", "name": "Dark mode support", "description": "Users requesting a dark theme"},
+]
+CANDIDATES = [{"signal_type": "new_feature_demand", "summary": "Another dark mode request"}]
 
 
 def seed_db(tmp_path):
@@ -92,3 +128,35 @@ def test_build_matching_prompt_includes_topic_and_candidate_text(tmp_path):
 
     assert "Dark mode support" in prompt
     assert "User wants CSV export" in prompt
+
+
+def test_call_matcher_returns_parsed_decisions():
+    decisions = [{"index": 0, "matched_topic_id": "TOPIC-0001", "new_topic": None}]
+    client = FakeClient([json.dumps(decisions)])
+
+    assert match.call_matcher(client, CANDIDATES, EXISTING_TOPICS) == decisions
+
+
+def test_call_matcher_returns_empty_list_without_calling_api_when_no_candidates():
+    client = FakeClient([])
+
+    assert match.call_matcher(client, [], EXISTING_TOPICS) == []
+
+
+def test_call_matcher_raises_api_error_on_api_failure():
+    client = FakeClient([RuntimeError("rate limited")])
+
+    with pytest.raises(match.MatchAPIError):
+        match.call_matcher(client, CANDIDATES, EXISTING_TOPICS)
+
+
+def test_call_matcher_raises_response_error_on_malformed_json():
+    client = FakeClient(["not json at all"])
+
+    with pytest.raises(match.MatchResponseError):
+        match.call_matcher(client, CANDIDATES, EXISTING_TOPICS)
+
+
+def test_match_error_subclasses_share_base_class():
+    assert issubclass(match.MatchAPIError, match.MatchError)
+    assert issubclass(match.MatchResponseError, match.MatchError)
