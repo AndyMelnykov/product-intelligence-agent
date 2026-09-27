@@ -1,0 +1,244 @@
+"""Golden-set loading, grading, and aggregation for the extraction/matching evals.
+
+Everything here is deterministic Python. The API-calling code lives in extract.py,
+match.py and evals/judge.py.
+"""
+import datetime
+from dataclasses import dataclass
+from pathlib import Path
+
+import yaml
+
+import extract
+
+ENTITY_KEYS = {"type", "company", "product"}
+EXTRACTION_EXPECTED_KEYS = {"skip", "signal_type", "entity", "effective_date"}
+
+
+class GoldenSchemaError(Exception):
+    """A golden file is malformed -- a bug in the eval data, not a model result."""
+
+
+@dataclass
+class ExtractionExample:
+    id: str
+    source: str
+    evidence: dict
+    expected: dict
+    reference_summary: str | None
+    notes: str | None = None
+
+
+@dataclass
+class MatchingScenario:
+    name: str
+    source: str
+    existing_topics: list
+    candidates: list
+    expected: list
+    notes: str | None = None
+
+
+def load_golden_dir(path, kind):
+    """Load and validate every .yaml/.yml file in `path`. `kind` is "extraction" or "matching"."""
+    loaders = {"extraction": _load_extraction_file, "matching": _load_matching_file}
+    if kind not in loaders:
+        raise ValueError(f"unknown golden kind {kind!r}")
+
+    files = sorted(p for p in Path(path).iterdir() if p.suffix in (".yaml", ".yml"))
+    if not files:
+        raise GoldenSchemaError(f"{path}: no .yaml golden files found")
+
+    items, seen = [], {}
+    for file_path in files:
+        for item in loaders[kind](file_path, _read_yaml(file_path)):
+            key = item.id if kind == "extraction" else item.name
+            if key in seen:
+                what = "id" if kind == "extraction" else "scenario name"
+                _fail(file_path, key, f"duplicate {what}, also defined in {seen[key]}")
+            seen[key] = file_path.name
+            items.append(item)
+    return items
+
+
+def filter_examples(items, name):
+    """Keep extraction examples whose golden file stem is `name`, or the matching scenario named `name`."""
+    if name is None:
+        return list(items)
+    return [item for item in items if (item.source if isinstance(item, ExtractionExample) else item.name) == name]
+
+
+def _read_yaml(file_path):
+    try:
+        data = yaml.safe_load(file_path.read_text(encoding="utf-8"))
+    except yaml.YAMLError as e:
+        raise GoldenSchemaError(f"{file_path.name}: invalid YAML: {e}") from e
+    if not isinstance(data, dict):
+        raise GoldenSchemaError(f"{file_path.name}: top level must be a mapping")
+    return data
+
+
+def _fail(file_path, item_id, message):
+    where = f"{file_path.name} [{item_id}]" if item_id else file_path.name
+    raise GoldenSchemaError(f"{where}: {message}")
+
+
+def _require_str(file_path, item_id, mapping, key, allow_empty=False):
+    value = mapping.get(key)
+    if not isinstance(value, str) or (not allow_empty and not value.strip()):
+        _fail(file_path, item_id, f"'{key}' must be a {'' if allow_empty else 'non-empty '}string")
+    return value
+
+
+def _normalize_date(file_path, item_id, value):
+    if value is None:
+        return None
+    if isinstance(value, datetime.date) and not isinstance(value, datetime.datetime):
+        return value.isoformat()
+    if isinstance(value, str):
+        try:
+            datetime.date.fromisoformat(value)
+        except ValueError:
+            pass
+        else:
+            return value
+    _fail(file_path, item_id, f"'expected.effective_date' must be null or a YYYY-MM-DD date, got {value!r}")
+
+
+def _parse_entity(file_path, item_id, value):
+    if value is None:
+        return None
+    if not isinstance(value, dict) or not value:
+        _fail(file_path, item_id, "'expected.entity' must be null or a mapping with any of type/company/product")
+    unknown = value.keys() - ENTITY_KEYS
+    if unknown:
+        _fail(file_path, item_id, f"unknown keys in 'expected.entity': {sorted(unknown)}")
+    for key, entity_value in value.items():
+        if entity_value is not None and not isinstance(entity_value, str):
+            _fail(file_path, item_id, f"'expected.entity.{key}' must be a string or null")
+    return dict(value)
+
+
+def _load_extraction_file(file_path, data):
+    _require_str(file_path, None, data, "product_area")
+    examples = data.get("examples")
+    if not isinstance(examples, list) or not examples:
+        _fail(file_path, None, "'examples' must be a non-empty list")
+    return [_parse_extraction_example(file_path, position, raw) for position, raw in enumerate(examples)]
+
+
+def _parse_extraction_example(file_path, position, raw):
+    if not isinstance(raw, dict):
+        _fail(file_path, f"#{position}", "example must be a mapping")
+    example_id = raw.get("id")
+    if not isinstance(example_id, str) or not example_id.strip():
+        _fail(file_path, f"#{position}", "'id' must be a non-empty string")
+
+    evidence = raw.get("evidence")
+    if not isinstance(evidence, dict):
+        _fail(file_path, example_id, "'evidence' must be a mapping")
+    evidence = {
+        "title": _require_str(file_path, example_id, evidence, "title"),
+        "content": _require_str(file_path, example_id, evidence, "content", allow_empty=True),
+    }
+
+    expected = raw.get("expected")
+    if not isinstance(expected, dict):
+        _fail(file_path, example_id, "'expected' must be a mapping")
+    unknown = expected.keys() - EXTRACTION_EXPECTED_KEYS
+    if unknown:
+        _fail(file_path, example_id, f"unknown keys in 'expected': {sorted(unknown)}")
+    skip = expected.get("skip")
+    if not isinstance(skip, bool):
+        _fail(file_path, example_id, "'expected.skip' must be true or false")
+
+    source = file_path.stem
+    notes = raw.get("notes")
+    if skip:
+        return ExtractionExample(example_id, source, evidence, {"skip": True}, None, notes)
+
+    for key in ("signal_type", "entity", "effective_date"):
+        if key not in expected:
+            _fail(file_path, example_id, f"'expected.{key}' is required when skip is false (use null for none)")
+    if expected["signal_type"] not in extract.SIGNAL_TYPES:
+        _fail(file_path, example_id, f"invalid expected signal_type {expected['signal_type']!r}")
+
+    return ExtractionExample(
+        id=example_id,
+        source=source,
+        evidence=evidence,
+        expected={
+            "skip": False,
+            "signal_type": expected["signal_type"],
+            "entity": _parse_entity(file_path, example_id, expected["entity"]),
+            "effective_date": _normalize_date(file_path, example_id, expected["effective_date"]),
+        },
+        reference_summary=_require_str(file_path, example_id, raw, "reference_summary").strip(),
+        notes=notes,
+    )
+
+
+def _load_matching_file(file_path, data):
+    name = _require_str(file_path, None, data, "name")
+
+    topics = data.get("existing_topics")
+    if not isinstance(topics, list):
+        _fail(file_path, name, "'existing_topics' must be a list (may be empty)")
+    topic_ids = set()
+    for topic in topics:
+        if not isinstance(topic, dict):
+            _fail(file_path, name, "each existing topic must be a mapping")
+        topic_id = _require_str(file_path, name, topic, "topic_id")
+        _require_str(file_path, name, topic, "name")
+        _require_str(file_path, name, topic, "description")
+        if topic_id in topic_ids:
+            _fail(file_path, name, f"duplicate topic_id {topic_id!r}")
+        topic_ids.add(topic_id)
+
+    candidates = data.get("candidates")
+    if not isinstance(candidates, list) or not candidates:
+        _fail(file_path, name, "'candidates' must be a non-empty list")
+    for candidate in candidates:
+        if not isinstance(candidate, dict):
+            _fail(file_path, name, "each candidate must be a mapping")
+        if candidate.get("signal_type") not in extract.SIGNAL_TYPES:
+            _fail(file_path, name, f"invalid candidate signal_type {candidate.get('signal_type')!r}")
+        _require_str(file_path, name, candidate, "summary")
+
+    expected = data.get("expected")
+    if not isinstance(expected, list):
+        _fail(file_path, name, "'expected' must be a list")
+    by_index = {}
+    for decision in expected:
+        if not isinstance(decision, dict):
+            _fail(file_path, name, "each expected decision must be a mapping")
+        index = decision.get("index")
+        if not isinstance(index, int) or isinstance(index, bool) or not 0 <= index < len(candidates):
+            _fail(file_path, name, f"expected index {index!r} is not a valid candidate index")
+        if index in by_index:
+            _fail(file_path, name, f"duplicate expected index {index}")
+        if "matched_topic_id" not in decision:
+            _fail(file_path, name, f"expected[{index}] needs 'matched_topic_id' (null for a new topic)")
+        topic_id = decision["matched_topic_id"]
+        new_topic = decision.get("new_topic")
+        if topic_id is not None:
+            if topic_id not in topic_ids:
+                _fail(file_path, name, f"expected[{index}] matched_topic_id {topic_id!r} is not in existing_topics")
+            if new_topic is not None:
+                _fail(file_path, name, f"expected[{index}] cannot set both matched_topic_id and new_topic")
+        elif new_topic is not None and not isinstance(new_topic, dict):
+            _fail(file_path, name, f"expected[{index}] new_topic must be null or a mapping")
+        by_index[index] = {"index": index, "matched_topic_id": topic_id}
+
+    missing = set(range(len(candidates))) - by_index.keys()
+    if missing:
+        _fail(file_path, name, f"no expected decision for candidate indexes {sorted(missing)}")
+
+    return [MatchingScenario(
+        name=name,
+        source=file_path.stem,
+        existing_topics=topics,
+        candidates=candidates,
+        expected=[by_index[i] for i in range(len(candidates))],
+        notes=data.get("notes"),
+    )]
