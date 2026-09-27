@@ -537,3 +537,60 @@ def test_grade_matching_api_error_is_errored():
 
     assert result.status == "errored"
     assert "connection reset" in result.error
+
+
+# --- aggregation & report ---
+
+def fr(field, passed, expected="x", actual="x", detail=None):
+    return harness.FieldResult(field, field, expected, actual, passed, detail)
+
+
+RESULTS = [
+    harness.ExampleResult("db-001", "database_development", "passed", [
+        fr("skip", True), fr("signal_type", True, "reliability_issue", "reliability_issue"), fr("summary", True),
+    ]),
+    harness.ExampleResult("db-002", "database_development", "failed", [
+        fr("skip", True), fr("signal_type", False, "reliability_issue", "usability_issue"),
+        fr("summary", False, "ref", "act", detail="Invents a cause."),
+    ]),
+    harness.ExampleResult("db-003", "database_development", "failed", [
+        fr("skip", True), fr("signal_type", False, "reliability_issue", "usability_issue"), fr("summary", True),
+    ]),
+    harness.ExampleResult("db-004", "database_development", "errored", [fr("skip", False)],
+                          error="API call failed: 529"),
+    harness.ExampleResult("db-005", "database_development", "failed", [], error="non-JSON response"),
+]
+
+
+def test_aggregate_counts_and_accuracy_excludes_errored():
+    report = harness.aggregate(RESULTS)
+
+    assert (report.total, report.passed, report.failed, report.errored) == (5, 1, 3, 1)
+    assert report.field_accuracy == {"skip": (3, 3), "signal_type": (1, 3), "summary": (2, 3)}
+    assert report.signal_type_confusion == {("reliability_issue", "usability_issue"): 2}
+    assert (report.judge_passed, report.judge_total) == (2, 3)
+    assert [r.example_id for r in report.failures] == ["db-002", "db-003", "db-005"]
+    assert [r.example_id for r in report.errors] == ["db-004"]
+
+
+def test_format_report_shows_every_section():
+    text = harness.format_report(harness.aggregate(RESULTS))
+
+    assert "5 total, 1 passed, 3 failed, 1 errored" in text
+    assert "signal_type" in text and "1/3" in text
+    assert "Summary judge pass rate: 2/3 (66.7%)" in text
+    assert "reliability_issue -> usability_issue  x2" in text
+    assert "[database_development] db-002" in text
+    assert "signal_type: expected 'reliability_issue', got 'usability_issue'" in text
+    assert "-- judge: Invents a cause." in text
+    assert "error: non-JSON response" in text
+    assert "db-004: API call failed: 529" in text
+    text.encode("ascii")  # layout itself adds no non-ASCII characters
+
+
+def test_aggregate_and_format_handle_empty_and_all_errored_runs():
+    for results in ([], [harness.ExampleResult("x", "s", "errored", error="boom")]):
+        report = harness.aggregate(results)
+        assert report.field_accuracy == {}
+        text = harness.format_report(report)
+        assert "Examples:" in text

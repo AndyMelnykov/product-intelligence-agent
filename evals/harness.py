@@ -4,6 +4,7 @@ Everything here is deterministic Python. The API-calling code lives in extract.p
 match.py and evals/judge.py.
 """
 import datetime
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -58,6 +59,20 @@ class ExampleResult:
     status: str
     fields: list = field(default_factory=list)
     error: str | None = None
+
+
+@dataclass
+class Report:
+    total: int
+    passed: int
+    failed: int
+    errored: int
+    field_accuracy: dict
+    signal_type_confusion: Counter
+    judge_passed: int
+    judge_total: int
+    failures: list
+    errors: list
 
 
 def load_golden_dir(path, kind):
@@ -372,3 +387,78 @@ def _is_complete_new_topic(new_topic):
     return isinstance(new_topic, dict) and all(
         isinstance(new_topic.get(key), str) and new_topic[key].strip() for key in ("name", "slug", "description")
     )
+
+
+def aggregate(results):
+    field_accuracy = {}
+    confusion = Counter()
+    judge_passed = judge_total = 0
+    for result in results:
+        if result.status == "errored":
+            continue
+        for f in result.fields:
+            correct, graded = field_accuracy.get(f.field, (0, 0))
+            field_accuracy[f.field] = (correct + int(f.passed), graded + 1)
+            if f.field == "signal_type" and not f.passed:
+                confusion[(f.expected, f.actual)] += 1
+            if f.field == "summary":
+                judge_total += 1
+                judge_passed += int(f.passed)
+
+    return Report(
+        total=len(results),
+        passed=sum(r.status == "passed" for r in results),
+        failed=sum(r.status == "failed" for r in results),
+        errored=sum(r.status == "errored" for r in results),
+        field_accuracy=field_accuracy,
+        signal_type_confusion=confusion,
+        judge_passed=judge_passed,
+        judge_total=judge_total,
+        failures=[r for r in results if r.status == "failed"],
+        errors=[r for r in results if r.status == "errored"],
+    )
+
+
+def format_report(report):
+    lines = [
+        "== Eval report ==",
+        f"Examples: {report.total} total, {report.passed} passed, {report.failed} failed, {report.errored} errored",
+    ]
+
+    if report.field_accuracy:
+        lines += ["", "Per-field accuracy (errored examples excluded):"]
+        for name, (correct, graded) in report.field_accuracy.items():
+            lines.append(f"  {name:<16} {correct}/{graded}  {_percent(correct, graded)}")
+
+    if report.judge_total:
+        lines += ["", f"Summary judge pass rate: {report.judge_passed}/{report.judge_total} "
+                      f"({_percent(report.judge_passed, report.judge_total)})"]
+
+    if report.signal_type_confusion:
+        lines += ["", "signal_type confusion (expected -> actual):"]
+        for (expected, actual), count in report.signal_type_confusion.most_common():
+            lines.append(f"  {expected} -> {actual}  x{count}")
+
+    if report.failures:
+        lines += ["", "Failures:"]
+        for result in report.failures:
+            lines.append(f"  [{result.source}] {result.example_id}")
+            if result.error:
+                lines.append(f"    error: {result.error}")
+            for f in result.fields:
+                if not f.passed:
+                    line = f"    {f.label}: expected {f.expected!r}, got {f.actual!r}"
+                    if f.detail:
+                        line += f" -- judge: {f.detail}"
+                    lines.append(line)
+
+    if report.errors:
+        lines += ["", "Errored (API failures, not counted as model mistakes):"]
+        for result in report.errors:
+            lines.append(f"  [{result.source}] {result.example_id}: {result.error}")
+
+    return "\n".join(lines)
+
+
+def _percent(numerator, denominator):
+    return f"{100 * numerator / denominator:.1f}%" if denominator else "n/a"
