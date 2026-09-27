@@ -1,3 +1,5 @@
+import dataclasses
+import json
 import textwrap
 
 import pytest
@@ -229,3 +231,184 @@ def test_filter_examples_by_matching_scenario_name(tmp_path):
 
     assert [s.name for s in harness.filter_examples(scenarios, "pooling")] == ["pooling"]
     assert harness.filter_examples(scenarios, "file_stem_differs") == []
+
+
+# --- fakes (repo FakeClient pattern; blocks carry a type because production reads the text block) ---
+
+class FakeContentBlock:
+    type = "text"
+
+    def __init__(self, text):
+        self.text = text
+
+
+class FakeResponse:
+    stop_reason = "end_turn"
+
+    def __init__(self, text):
+        self.content = [FakeContentBlock(text)]
+
+
+class FakeMessages:
+    def __init__(self, responses):
+        self._responses = list(responses)
+
+    def create(self, **kwargs):
+        result = self._responses.pop(0)
+        if isinstance(result, Exception):
+            raise result
+        return FakeResponse(result)
+
+
+class FakeClient:
+    def __init__(self, responses):
+        self.messages = FakeMessages(responses)
+
+
+# --- extraction grading ---
+
+EXAMPLE = harness.ExtractionExample(
+    id="db-001",
+    source="database_development",
+    evidence={"title": "Migration tool times out", "content": "It hangs on 40M-row tables."},
+    expected={"skip": False, "signal_type": "reliability_issue", "entity": None, "effective_date": None},
+    reference_summary="Migration tool times out on large tables.",
+)
+SKIP_EXAMPLE = dataclasses.replace(EXAMPLE, id="db-002", expected={"skip": True}, reference_summary=None)
+
+JUDGE_PASS = json.dumps({"verdict": "pass", "reason": "Faithful."})
+JUDGE_FAIL = json.dumps({"verdict": "fail", "reason": "Adds a cause the post never states."})
+
+
+def extraction_response(**overrides):
+    body = {
+        "signal_type": "reliability_issue", "summary": "Migrations hang on large tables",
+        "confidence": 0.9, "entity": None, "effective_date": None,
+    }
+    body.update(overrides)
+    return json.dumps(body)
+
+
+def test_grade_extraction_all_fields_match():
+    client = FakeClient([extraction_response(), JUDGE_PASS])
+
+    result = harness.grade_extraction_example(EXAMPLE, client)
+
+    assert result.status == "passed"
+    assert result.example_id == "db-001"
+    assert result.source == "database_development"
+    assert [f.field for f in result.fields] == ["skip", "signal_type", "entity", "effective_date", "summary"]
+    assert all(f.passed for f in result.fields)
+
+
+def test_grade_extraction_signal_type_mismatch_fails_with_expected_and_actual():
+    client = FakeClient([extraction_response(signal_type="usability_issue"), JUDGE_PASS])
+
+    result = harness.grade_extraction_example(EXAMPLE, client)
+
+    assert result.status == "failed"
+    [miss] = [f for f in result.fields if not f.passed]
+    assert (miss.field, miss.expected, miss.actual) == ("signal_type", "reliability_issue", "usability_issue")
+
+
+def test_grade_extraction_judge_fail_records_reason():
+    client = FakeClient([extraction_response(), JUDGE_FAIL])
+
+    result = harness.grade_extraction_example(EXAMPLE, client)
+
+    assert result.status == "failed"
+    summary = result.fields[-1]
+    assert summary.field == "summary"
+    assert summary.passed is False
+    assert summary.actual == "Migrations hang on large tables"
+    assert summary.detail == "Adds a cause the post never states."
+
+
+def test_grade_extraction_expected_skip_and_model_skips_passes_without_judge():
+    client = FakeClient([json.dumps({"skip": True})])  # no judge response scripted
+
+    result = harness.grade_extraction_example(SKIP_EXAMPLE, client)
+
+    assert result.status == "passed"
+    assert [f.field for f in result.fields] == ["skip"]
+
+
+def test_grade_extraction_expected_skip_but_model_extracts_fails():
+    client = FakeClient([extraction_response()])
+
+    result = harness.grade_extraction_example(SKIP_EXAMPLE, client)
+
+    assert result.status == "failed"
+    assert [(f.field, f.expected, f.actual) for f in result.fields] == [("skip", True, False)]
+
+
+def test_grade_extraction_model_skips_unexpectedly_fails_on_skip_only():
+    client = FakeClient([json.dumps({"skip": True})])
+
+    result = harness.grade_extraction_example(EXAMPLE, client)
+
+    assert result.status == "failed"
+    assert [(f.field, f.expected, f.actual) for f in result.fields] == [("skip", False, True)]
+
+
+def test_grade_extraction_unusable_response_is_failed_and_names_example():
+    client = FakeClient(["not json at all"])
+
+    result = harness.grade_extraction_example(EXAMPLE, client)
+
+    assert result.status == "failed"
+    assert "db-001" in result.error
+    assert result.fields == []
+
+
+def test_grade_extraction_api_error_is_errored():
+    client = FakeClient([RuntimeError("rate limited")])
+
+    result = harness.grade_extraction_example(EXAMPLE, client)
+
+    assert result.status == "errored"
+    assert "db-001" in result.error
+    assert "rate limited" in result.error
+
+
+def test_grade_extraction_judge_api_error_is_errored():
+    client = FakeClient([extraction_response(), RuntimeError("judge overloaded")])
+
+    result = harness.grade_extraction_example(EXAMPLE, client)
+
+    assert result.status == "errored"
+    assert result.error.startswith("judge:")
+
+
+def test_grade_extraction_entity_graded_on_named_keys_only():
+    example = dataclasses.replace(EXAMPLE, expected={**EXAMPLE.expected, "entity": {"company": "Oracle"}})
+    entity = {"type": "vendor", "company": " oracle ", "product": "Oracle Database 19c"}
+    client = FakeClient([extraction_response(entity=entity), JUDGE_PASS])
+
+    result = harness.grade_extraction_example(example, client)
+
+    assert result.status == "passed"
+
+
+def test_grade_extraction_effective_date_mismatch_fails():
+    example = dataclasses.replace(EXAMPLE, expected={**EXAMPLE.expected, "effective_date": "2027-04-30"})
+    client = FakeClient([extraction_response(effective_date="2027-05-01"), JUDGE_PASS])
+
+    result = harness.grade_extraction_example(example, client)
+
+    [miss] = [f for f in result.fields if not f.passed]
+    assert (miss.field, miss.expected, miss.actual) == ("effective_date", "2027-04-30", "2027-05-01")
+
+
+@pytest.mark.parametrize("expected, actual, matches", [
+    (None, None, True),
+    (None, {"type": None, "company": None, "product": None}, True),
+    (None, {}, True),
+    (None, {"type": "vendor", "company": "Oracle", "product": None}, False),
+    ({"company": "Oracle"}, None, False),
+    ({"company": "Oracle"}, {"type": "x", "company": "ORACLE", "product": "DB"}, True),
+    ({"company": "Oracle", "product": "Database 19c"}, {"company": "Oracle", "product": "Database 21c"}, False),
+    ({"company": "Oracle", "product": None}, {"company": "Oracle"}, True),
+])
+def test_entity_matches(expected, actual, matches):
+    assert harness.entity_matches(expected, actual) is matches

@@ -4,12 +4,13 @@ Everything here is deterministic Python. The API-calling code lives in extract.p
 match.py and evals/judge.py.
 """
 import datetime
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import yaml
 
 import extract
+from evals import judge
 
 ENTITY_KEYS = {"type", "company", "product"}
 EXTRACTION_EXPECTED_KEYS = {"skip", "signal_type", "entity", "effective_date"}
@@ -37,6 +38,25 @@ class MatchingScenario:
     candidates: list
     expected: list
     notes: str | None = None
+
+
+@dataclass
+class FieldResult:
+    field: str
+    label: str
+    expected: object
+    actual: object
+    passed: bool
+    detail: str | None = None
+
+
+@dataclass
+class ExampleResult:
+    example_id: str
+    source: str
+    status: str
+    fields: list = field(default_factory=list)
+    error: str | None = None
 
 
 def load_golden_dir(path, kind):
@@ -242,3 +262,58 @@ def _load_matching_file(file_path, data):
         expected=[by_index[i] for i in range(len(candidates))],
         notes=data.get("notes"),
     )]
+
+
+def grade_extraction_example(example, client):
+    try:
+        actual = extract.extract_topic(client, {**example.evidence, "evidence_id": example.id})
+    except extract.ExtractionAPIError as e:
+        return ExampleResult(example.id, example.source, "errored", error=str(e))
+    except extract.ExtractionResponseError as e:
+        return ExampleResult(example.id, example.source, "failed", error=str(e))
+
+    expected = example.expected
+    actual_skip = actual is None
+    fields = [_exact("skip", expected["skip"], actual_skip)]
+    if expected["skip"] or actual_skip:
+        return _finish(example.id, example.source, fields)
+
+    fields.append(_exact("signal_type", expected["signal_type"], actual["signal_type"]))
+    fields.append(FieldResult(
+        "entity", "entity", expected["entity"], actual["entity"],
+        entity_matches(expected["entity"], actual["entity"]),
+    ))
+    fields.append(_exact("effective_date", expected["effective_date"], actual["effective_date"]))
+
+    try:
+        verdict = judge.judge_summary(example.evidence, example.reference_summary, actual["summary"], client)
+    except judge.JudgeError as e:
+        return ExampleResult(example.id, example.source, "errored", fields, error=f"judge: {e}")
+    fields.append(FieldResult(
+        "summary", "summary", example.reference_summary, actual["summary"], verdict.passed, detail=verdict.reason,
+    ))
+    return _finish(example.id, example.source, fields)
+
+
+def entity_matches(expected, actual):
+    """Null must match null. Otherwise each key the golden file names must match, ignoring case
+    and surrounding whitespace. Keys the golden file leaves out (usually the free-form 'type')
+    are not graded. An entity whose values are all null counts as null."""
+    if actual is not None and all(value is None for value in actual.values()):
+        actual = None
+    if expected is None or actual is None:
+        return expected is None and actual is None
+    return all(_normalize_text(actual.get(key)) == _normalize_text(value) for key, value in expected.items())
+
+
+def _normalize_text(value):
+    return value.strip().casefold() if isinstance(value, str) else value
+
+
+def _exact(name, expected, actual):
+    return FieldResult(name, name, expected, actual, expected == actual)
+
+
+def _finish(example_id, source, fields):
+    status = "passed" if all(f.passed for f in fields) else "failed"
+    return ExampleResult(example_id, source, status, fields)
