@@ -1,0 +1,31 @@
+name: mixed_new_and_existing
+existing_topics:
+  - topic_id: TOPIC-0001
+    name: "Migration timeouts on large tables"
+    description: "Schema/data migrations hang or time out on tables with tens of millions of rows"
+  - topic_id: TOPIC-0002
+    name: "CTE-aware autocomplete"
+    description: "Users want editor autocomplete to suggest columns defined in WITH clauses"
+candidates:
+  - signal_type: reliability_issue
+    summary: "Migration job stalls forever on a 60M-row table"
+  - signal_type: reliability_issue
+    summary: "Editor crashes when opening a 200 MB SQL file"
+  - signal_type: new_feature_demand
+    summary: "Wants a dark theme for the query editor"
+expected:
+  - index: 0
+    matched_topic_id: TOPIC-0001
+  - index: 1
+    matched_topic_id: null
+    new_topic:
+      name: "Editor crash on large SQL files"
+  - index: 2
+    matched_topic_id: null
+    new_topic:
+      name: "Dark theme"
+notes: >
+  Candidate 1 shares signal_type with TOPIC-0001 but is a different issue -- exercises the
+  prompt's "not just the same signal_type" rule. Candidate 2 shares signal_type with TOPIC-0002
+  but is a different request. Golden new_topic names are documentation only; grading checks
+  that a new topic was created, not its wording.

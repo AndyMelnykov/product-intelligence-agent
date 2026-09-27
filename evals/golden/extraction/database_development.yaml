@@ -1,0 +1,87 @@
+# Seed examples: synthetic posts written to exercise every grading path (skip, signal_type,
+# entity, effective_date, summary). Replace or extend with ~20 real r/ posts whose labels have
+# been manually verified -- see the spec's "Open items".
+product_area: database_development
+examples:
+  - id: db-001
+    evidence:
+      title: "Postgres migration tool keeps timing out on large tables"
+      content: >
+        Every time I try to run a migration on our biggest table (40M rows) it just
+        hangs and eventually times out. No error message, just nothing.
+    expected:
+      skip: false
+      signal_type: reliability_issue
+      entity: null
+      effective_date: null
+    reference_summary: >
+      User reports the migration tool times out on large tables with no error message.
+    notes: >
+      Clear reliability complaint; no company/product named, so entity must be null.
+
+  - id: db-002
+    evidence:
+      title: "Check out my new crypto trading bot!!!"
+      content: "Link in bio, DM me for early access"
+    expected:
+      skip: true
+    notes: "Off-topic spam; extractor should skip it entirely."
+
+  - id: db-003
+    evidence:
+      title: "Autocomplete should know about CTE columns"
+      content: >
+        When I write a WITH clause, the editor's autocomplete has no idea what columns
+        the CTE returns, so I end up typing everything by hand. Would be a huge time saver
+        if it could infer them.
+    expected:
+      skip: false
+      signal_type: new_feature_demand
+      entity: null
+      effective_date: null
+    reference_summary: >
+      User wants the SQL editor's autocomplete to suggest columns defined in CTEs.
+    notes: "Feature request, not a bug: autocomplete works, it just lacks CTE support."
+
+  - id: db-004
+    evidence:
+      title: "License price doubled at renewal"
+      content: >
+        Our team renewal quote came in at twice last year's price for the same five seats.
+        Nothing new that we use was added. Hard to justify this to finance.
+    expected:
+      skip: false
+      signal_type: pricing_complaint
+      entity: null
+      effective_date: null
+    reference_summary: >
+      User complains the renewal price doubled for the same seats without added value.
+    notes: "No switching intent stated, so pricing_complaint rather than switching_intent."
+
+  - id: db-005
+    evidence:
+      title: "Oracle 19c extended support ends 2027-04-30 -- planning our move"
+      content: >
+        Oracle confirmed Extended Support for Database 19c ends on 2027-04-30. We have to
+        migrate about 30 schemas before then and are evaluating which tooling can handle
+        the schema compare and data move.
+    expected:
+      skip: false
+      signal_type: customer_migration_intent
+      entity:
+        company: Oracle
+      effective_date: 2027-04-30
+    reference_summary: >
+      User must migrate ~30 schemas off Oracle Database 19c before extended support ends
+      on 2027-04-30 and is evaluating migration tooling.
+    notes: >
+      Exercises entity + effective_date. Only company is graded; the model's free-form
+      entity.type and exact product wording are not.
+
+  - id: db-006
+    evidence:
+      title: "hi"
+      content: "."
+    expected:
+      skip: true
+    notes: "Low-effort post with no content; should be skipped."
