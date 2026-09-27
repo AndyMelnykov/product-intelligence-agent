@@ -242,3 +242,18 @@ def test_extract_topic_raises_response_error_when_no_text_block():
 
     with pytest.raises(extract.ExtractionResponseError, match="no text block"):
         extract.extract_topic(client, SAMPLE_EVIDENCE)
+
+
+@pytest.mark.parametrize("raw", ['["a"]', '"skip"', "42"])
+def test_extract_topic_raises_response_error_for_non_object_json(raw):
+    client = FakeClient([raw])
+
+    with pytest.raises(extract.ExtractionResponseError, match="expected a JSON object"):
+        extract.extract_topic(client, SAMPLE_EVIDENCE)
+
+
+def test_extract_topic_raises_response_error_for_non_string_signal_type():
+    client = FakeClient([json.dumps({"signal_type": ["reliability_issue"], "summary": "x", "confidence": 0.5})])
+
+    with pytest.raises(extract.ExtractionResponseError, match="invalid signal_type"):
+        extract.extract_topic(client, SAMPLE_EVIDENCE)

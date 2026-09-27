@@ -594,3 +594,24 @@ def test_aggregate_and_format_handle_empty_and_all_errored_runs():
         assert report.field_accuracy == {}
         text = harness.format_report(report)
         assert "Examples:" in text
+
+
+def test_grade_extraction_non_object_json_is_failed_not_crash():
+    client = FakeClient(['[{"skip": true}]'])
+
+    result = harness.grade_extraction_example(EXAMPLE, client)
+
+    assert result.status == "failed"
+    assert "expected a JSON object" in result.error
+
+
+def test_grade_matching_unhashable_or_non_int_index_fails_without_crash():
+    client = FakeClient([matcher_response(
+        {"index": [0], "matched_topic_id": "TOPIC-0001", "new_topic": None},
+        {"index": "1", "matched_topic_id": None, "new_topic": NEW_TOPIC},
+    )])
+
+    result = harness.grade_matching_scenario(SCENARIO, client)
+
+    assert result.status == "failed"
+    assert [f.actual for f in result.fields] == ["0 decisions for this index", "0 decisions for this index"]

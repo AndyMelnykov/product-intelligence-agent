@@ -351,7 +351,10 @@ def grade_matching_scenario(scenario, client):
 
     decisions_by_index = {}
     for decision in decisions:
-        decisions_by_index.setdefault(decision.get("index"), []).append(decision)
+        index = decision.get("index")
+        # Non-int indexes (including unhashable ones) match no candidate, so they surface as missing decisions.
+        if isinstance(index, int) and not isinstance(index, bool):
+            decisions_by_index.setdefault(index, []).append(decision)
 
     fields = []
     for expected in scenario.expected:

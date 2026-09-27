@@ -87,6 +87,9 @@ def extract_topic(client, evidence: dict):
     except json.JSONDecodeError as e:
         raise ExtractionResponseError(f"evidence {evidence_label}: non-JSON response: {raw_text!r}") from e
 
+    if not isinstance(parsed, dict):
+        raise ExtractionResponseError(f"evidence {evidence_label}: expected a JSON object, got {raw_text!r}")
+
     if parsed.get("skip"):
         return None
 
@@ -94,7 +97,7 @@ def extract_topic(client, evidence: dict):
     if missing:
         raise ExtractionResponseError(f"evidence {evidence_label}: response missing keys {missing}")
 
-    if parsed["signal_type"] not in SIGNAL_TYPES:
+    if not isinstance(parsed["signal_type"], str) or parsed["signal_type"] not in SIGNAL_TYPES:
         raise ExtractionResponseError(f"evidence {evidence_label}: invalid signal_type {parsed['signal_type']!r}")
 
     entity = parsed.get("entity")
