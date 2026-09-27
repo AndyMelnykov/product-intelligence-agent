@@ -68,12 +68,19 @@ def extract_topic(client, evidence: dict):
     try:
         response = client.messages.create(
             model=EXTRACTION_MODEL,
-            max_tokens=500,
+            max_tokens=4000,
             messages=[{"role": "user", "content": prompt}],
         )
-        raw_text = response.content[0].text
     except Exception as e:
         raise ExtractionAPIError(f"evidence {evidence_label}: API call failed: {e}") from e
+
+    # Sonnet 5 runs adaptive thinking by default, so a thinking block may precede the answer.
+    raw_text = next((block.text for block in response.content if block.type == "text"), None)
+    if raw_text is None:
+        raise ExtractionResponseError(
+            f"evidence {evidence_label}: response has no text block "
+            f"(stop_reason={getattr(response, 'stop_reason', None)!r})"
+        )
 
     try:
         parsed = json.loads(raw_text)

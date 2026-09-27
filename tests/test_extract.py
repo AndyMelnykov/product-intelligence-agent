@@ -8,6 +8,8 @@ import extract
 
 
 class FakeContentBlock:
+    type = "text"
+
     def __init__(self, text):
         self.text = text
 
@@ -25,12 +27,19 @@ class FakeMessages:
         result = self._responses.pop(0)
         if isinstance(result, Exception):
             raise result
+        if isinstance(result, FakeResponse):
+            return result
         return FakeResponse(result)
 
 
 class FakeClient:
     def __init__(self, responses):
         self.messages = FakeMessages(responses)
+
+
+class FakeThinkingBlock:
+    type = "thinking"
+    thinking = ""
 
 
 SAMPLE_EVIDENCE = {
@@ -212,3 +221,24 @@ def test_run_persists_entity_and_effective_date_from_extraction(tmp_path):
         "type": "competitor_product", "company": "Competitor X", "product": "Product Y",
     }
     assert row["effective_date"] == "2027-05-31"
+
+
+def test_extract_topic_reads_text_block_after_thinking_block():
+    response = FakeResponse(json.dumps(
+        {"signal_type": "new_feature_demand", "summary": "User wants a dark theme", "confidence": 0.9}
+    ))
+    response.content.insert(0, FakeThinkingBlock())
+    client = FakeClient([response])
+
+    result = extract.extract_topic(client, SAMPLE_EVIDENCE)
+
+    assert result["signal_type"] == "new_feature_demand"
+
+
+def test_extract_topic_raises_response_error_when_no_text_block():
+    response = FakeResponse("unused")
+    response.content = [FakeThinkingBlock()]
+    client = FakeClient([response])
+
+    with pytest.raises(extract.ExtractionResponseError, match="no text block"):
+        extract.extract_topic(client, SAMPLE_EVIDENCE)

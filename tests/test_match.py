@@ -7,6 +7,8 @@ import match
 
 
 class FakeContentBlock:
+    type = "text"
+
     def __init__(self, text):
         self.text = text
 
@@ -24,12 +26,19 @@ class FakeMessages:
         result = self._responses.pop(0)
         if isinstance(result, Exception):
             raise result
+        if isinstance(result, FakeResponse):
+            return result
         return FakeResponse(result)
 
 
 class FakeClient:
     def __init__(self, responses):
         self.messages = FakeMessages(responses)
+
+
+class FakeThinkingBlock:
+    type = "thinking"
+    thinking = ""
 
 
 EXISTING_TOPICS = [
@@ -160,3 +169,22 @@ def test_call_matcher_raises_response_error_on_malformed_json():
 def test_match_error_subclasses_share_base_class():
     assert issubclass(match.MatchAPIError, match.MatchError)
     assert issubclass(match.MatchResponseError, match.MatchError)
+
+
+def test_call_matcher_reads_text_block_after_thinking_block():
+    response = FakeResponse(json.dumps([{"index": 0, "matched_topic_id": "TOPIC-0001", "new_topic": None}]))
+    response.content.insert(0, FakeThinkingBlock())
+    client = FakeClient([response])
+
+    decisions = match.call_matcher(client, CANDIDATES, EXISTING_TOPICS)
+
+    assert decisions == [{"index": 0, "matched_topic_id": "TOPIC-0001", "new_topic": None}]
+
+
+def test_call_matcher_raises_response_error_when_no_text_block():
+    response = FakeResponse("unused")
+    response.content = [FakeThinkingBlock()]
+    client = FakeClient([response])
+
+    with pytest.raises(match.MatchResponseError, match="no text block"):
+        match.call_matcher(client, CANDIDATES, EXISTING_TOPICS)
