@@ -39,6 +39,8 @@ class FakeRedditClient:
 
 
 class FakeContentBlock:
+    type = "text"
+
     def __init__(self, text):
         self.text = text
 

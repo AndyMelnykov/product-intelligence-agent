@@ -360,3 +360,21 @@ handled by PRAW's built-in throttling. See the design spec for details.
 ## License
 
 See [LICENSE](LICENSE).
+
+
+## Evals
+
+`evals/` holds a golden-set eval suite for the two stages that ask Claude to make judgment
+calls: extraction (`extract.py`) and topic matching (`match.py`). The runners call the real
+production functions against the real Anthropic API. They are **not** run by pytest or CI.
+
+```powershell
+python evals/run_extraction_eval.py [--filter database_development] [--model claude-sonnet-5]
+python evals/run_matching_eval.py   [--filter connection_pooling_duplicate] [--model claude-sonnet-5]
+```
+
+- The API key comes from the OS credential store, the same way the pipeline gets it (`set_credentials.py`).
+- The extraction eval exact-matches `skip`, `signal_type`, `entity` (only the keys the golden file names, case-insensitive), and `effective_date`. It grades `summary` with an LLM judge (`evals/judge.py`, `claude-opus-5`). Each non-skipped example costs two API calls.
+- The matching eval checks each candidate's decision: it must match the named existing topic, or create a complete new topic when the golden file says `matched_topic_id: null`.
+- Results are classified as `passed`, `failed` (a model mistake, including unusable output), or `errored` (the API call failed, so the example is excluded from accuracy). The exit code is 0 whenever a report is printed. It is 2 for malformed golden YAML, a `--filter` that matches nothing, or missing credentials.
+- Golden data lives in `evals/golden/extraction/<product_area>.yaml` (many examples per file) and `evals/golden/matching/<scenario>.yaml` (one scenario per file). See the design spec at `docs/superpowers/specs/2026-09-24-extraction-matching-evals-design.md` for the format. `tests/test_evals_golden.py` validates the committed golden files in CI.

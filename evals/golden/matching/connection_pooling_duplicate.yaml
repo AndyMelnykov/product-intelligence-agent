@@ -1,0 +1,15 @@
+name: connection_pooling_duplicate
+existing_topics:
+  - topic_id: TOPIC-0001
+    name: "Connection pooling exhaustion under load"
+    description: "Users hitting max-connections errors under concurrent load"
+candidates:
+  - signal_type: reliability_issue
+    summary: "App runs out of DB connections during traffic spikes"
+expected:
+  - index: 0
+    matched_topic_id: TOPIC-0001
+    new_topic: null
+notes: >
+  Same underlying issue phrased differently; should match the existing topic rather
+  than spawn a duplicate.

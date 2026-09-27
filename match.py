@@ -41,7 +41,7 @@ class MatchAPIError(MatchError):
 
 
 class MatchResponseError(MatchError):
-    """The model responded, but the response was not valid JSON."""
+    """The model responded, but the response was unusable (no text block, or not valid JSON)."""
 
 
 def build_matching_prompt(candidates, existing_topics):
@@ -67,12 +67,18 @@ def call_matcher(client, candidates, existing_topics):
     try:
         response = client.messages.create(
             model=MATCH_MODEL,
-            max_tokens=1500,
+            max_tokens=8000,
             messages=[{"role": "user", "content": prompt}],
         )
-        raw_text = response.content[0].text
     except Exception as e:
         raise MatchAPIError(f"matching call failed: {e}") from e
+
+    # Sonnet 5 runs adaptive thinking by default, so a thinking block may precede the answer.
+    raw_text = next((block.text for block in response.content if block.type == "text"), None)
+    if raw_text is None:
+        raise MatchResponseError(
+            f"matching response has no text block (stop_reason={getattr(response, 'stop_reason', None)!r})"
+        )
 
     try:
         return json.loads(raw_text)

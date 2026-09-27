@@ -68,17 +68,27 @@ def extract_topic(client, evidence: dict):
     try:
         response = client.messages.create(
             model=EXTRACTION_MODEL,
-            max_tokens=500,
+            max_tokens=4000,
             messages=[{"role": "user", "content": prompt}],
         )
-        raw_text = response.content[0].text
     except Exception as e:
         raise ExtractionAPIError(f"evidence {evidence_label}: API call failed: {e}") from e
+
+    # Sonnet 5 runs adaptive thinking by default, so a thinking block may precede the answer.
+    raw_text = next((block.text for block in response.content if block.type == "text"), None)
+    if raw_text is None:
+        raise ExtractionResponseError(
+            f"evidence {evidence_label}: response has no text block "
+            f"(stop_reason={getattr(response, 'stop_reason', None)!r})"
+        )
 
     try:
         parsed = json.loads(raw_text)
     except json.JSONDecodeError as e:
         raise ExtractionResponseError(f"evidence {evidence_label}: non-JSON response: {raw_text!r}") from e
+
+    if not isinstance(parsed, dict):
+        raise ExtractionResponseError(f"evidence {evidence_label}: expected a JSON object, got {raw_text!r}")
 
     if parsed.get("skip"):
         return None
@@ -87,7 +97,7 @@ def extract_topic(client, evidence: dict):
     if missing:
         raise ExtractionResponseError(f"evidence {evidence_label}: response missing keys {missing}")
 
-    if parsed["signal_type"] not in SIGNAL_TYPES:
+    if not isinstance(parsed["signal_type"], str) or parsed["signal_type"] not in SIGNAL_TYPES:
         raise ExtractionResponseError(f"evidence {evidence_label}: invalid signal_type {parsed['signal_type']!r}")
 
     entity = parsed.get("entity")
