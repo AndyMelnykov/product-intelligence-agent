@@ -10,6 +10,7 @@ from pathlib import Path
 import yaml
 
 import extract
+import match
 from evals import judge
 
 ENTITY_KEYS = {"type", "company", "product"}
@@ -317,3 +318,57 @@ def _exact(name, expected, actual):
 def _finish(example_id, source, fields):
     status = "passed" if all(f.passed for f in fields) else "failed"
     return ExampleResult(example_id, source, status, fields)
+
+
+def grade_matching_scenario(scenario, client):
+    try:
+        decisions = match.call_matcher(client, scenario.candidates, scenario.existing_topics)
+    except match.MatchAPIError as e:
+        return ExampleResult(scenario.name, scenario.source, "errored", error=str(e))
+    except match.MatchResponseError as e:
+        return ExampleResult(scenario.name, scenario.source, "failed", error=str(e))
+
+    if not isinstance(decisions, list) or not all(isinstance(d, dict) for d in decisions):
+        return ExampleResult(
+            scenario.name, scenario.source, "failed",
+            error=f"matcher returned {type(decisions).__name__}, expected a JSON array of objects: {decisions!r}",
+        )
+
+    decisions_by_index = {}
+    for decision in decisions:
+        decisions_by_index.setdefault(decision.get("index"), []).append(decision)
+
+    fields = []
+    for expected in scenario.expected:
+        index = expected["index"]
+        want = expected["matched_topic_id"]
+        field_name = "match_existing" if want else "new_topic"
+        label = f"candidate[{index}]"
+        expected_desc = want or "NEW"
+        got = decisions_by_index.get(index, [])
+        if len(got) != 1:
+            fields.append(FieldResult(field_name, label, expected_desc, f"{len(got)} decisions for this index", False))
+            continue
+        actual_desc, passed = _grade_decision(want, got[0])
+        fields.append(FieldResult(field_name, label, expected_desc, actual_desc, passed))
+    return _finish(scenario.name, scenario.source, fields)
+
+
+def _grade_decision(want, decision):
+    """Returns (description of what the model decided, whether it matches `want`)."""
+    got_id = decision.get("matched_topic_id")
+    new_topic = decision.get("new_topic")
+    if got_id:
+        if new_topic:
+            return f"{got_id} (new_topic also set)", False
+        return got_id, got_id == want
+    if _is_complete_new_topic(new_topic):
+        return f"NEW: {new_topic['name']}", want is None
+    return f"invalid decision {decision!r}", False
+
+
+def _is_complete_new_topic(new_topic):
+    # match.apply_matches needs all three keys to create the topic.
+    return isinstance(new_topic, dict) and all(
+        isinstance(new_topic.get(key), str) and new_topic[key].strip() for key in ("name", "slug", "description")
+    )

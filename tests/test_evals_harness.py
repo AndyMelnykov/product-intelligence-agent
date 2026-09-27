@@ -412,3 +412,128 @@ def test_grade_extraction_effective_date_mismatch_fails():
 ])
 def test_entity_matches(expected, actual, matches):
     assert harness.entity_matches(expected, actual) is matches
+
+
+# --- matching grading ---
+
+SCENARIO = harness.MatchingScenario(
+    name="pooling",
+    source="pooling",
+    existing_topics=[{
+        "topic_id": "TOPIC-0001", "name": "Connection pooling exhaustion",
+        "description": "Max-connections errors under load",
+    }],
+    candidates=[
+        {"signal_type": "reliability_issue", "summary": "Runs out of DB connections during spikes"},
+        {"signal_type": "new_feature_demand", "summary": "Wants CSV export"},
+    ],
+    expected=[{"index": 0, "matched_topic_id": "TOPIC-0001"}, {"index": 1, "matched_topic_id": None}],
+)
+NEW_TOPIC = {"name": "CSV export", "slug": "csv-export", "description": "User wants CSV export"}
+
+
+def matcher_response(*decisions):
+    return json.dumps(list(decisions))
+
+
+def test_grade_matching_all_correct():
+    client = FakeClient([matcher_response(
+        {"index": 0, "matched_topic_id": "TOPIC-0001", "new_topic": None},
+        {"index": 1, "matched_topic_id": None, "new_topic": NEW_TOPIC},
+    )])
+
+    result = harness.grade_matching_scenario(SCENARIO, client)
+
+    assert result.status == "passed"
+    assert result.example_id == "pooling"
+    assert [(f.field, f.label, f.expected, f.actual) for f in result.fields] == [
+        ("match_existing", "candidate[0]", "TOPIC-0001", "TOPIC-0001"),
+        ("new_topic", "candidate[1]", "NEW", "NEW: CSV export"),
+    ]
+
+
+def test_grade_matching_duplicate_topic_spawned_fails():
+    client = FakeClient([matcher_response(
+        {"index": 0, "matched_topic_id": None, "new_topic": {**NEW_TOPIC, "name": "DB connection limits"}},
+        {"index": 1, "matched_topic_id": None, "new_topic": NEW_TOPIC},
+    )])
+
+    result = harness.grade_matching_scenario(SCENARIO, client)
+
+    assert result.status == "failed"
+    assert result.fields[0].passed is False
+    assert result.fields[0].actual == "NEW: DB connection limits"
+
+
+def test_grade_matching_wrongly_merged_into_existing_fails():
+    client = FakeClient([matcher_response(
+        {"index": 0, "matched_topic_id": "TOPIC-0001", "new_topic": None},
+        {"index": 1, "matched_topic_id": "TOPIC-0001", "new_topic": None},
+    )])
+
+    result = harness.grade_matching_scenario(SCENARIO, client)
+
+    assert [f.passed for f in result.fields] == [True, False]
+
+
+def test_grade_matching_both_match_and_new_topic_fails():
+    client = FakeClient([matcher_response(
+        {"index": 0, "matched_topic_id": "TOPIC-0001", "new_topic": NEW_TOPIC},
+        {"index": 1, "matched_topic_id": None, "new_topic": NEW_TOPIC},
+    )])
+
+    result = harness.grade_matching_scenario(SCENARIO, client)
+
+    assert result.fields[0].passed is False
+    assert "new_topic also set" in result.fields[0].actual
+
+
+def test_grade_matching_incomplete_new_topic_fails():
+    client = FakeClient([matcher_response(
+        {"index": 0, "matched_topic_id": "TOPIC-0001", "new_topic": None},
+        {"index": 1, "matched_topic_id": None, "new_topic": {"name": "CSV export"}},
+    )])
+
+    result = harness.grade_matching_scenario(SCENARIO, client)
+
+    assert result.fields[1].passed is False
+    assert result.fields[1].actual.startswith("invalid decision")
+
+
+def test_grade_matching_missing_and_duplicate_indexes_fail():
+    client = FakeClient([matcher_response(
+        {"index": 0, "matched_topic_id": "TOPIC-0001", "new_topic": None},
+        {"index": 0, "matched_topic_id": "TOPIC-0001", "new_topic": None},
+    )])
+
+    result = harness.grade_matching_scenario(SCENARIO, client)
+
+    assert result.status == "failed"
+    assert [f.actual for f in result.fields] == ["2 decisions for this index", "0 decisions for this index"]
+
+
+def test_grade_matching_non_array_json_fails():
+    client = FakeClient([json.dumps({"index": 0, "matched_topic_id": "TOPIC-0001"})])
+
+    result = harness.grade_matching_scenario(SCENARIO, client)
+
+    assert result.status == "failed"
+    assert "expected a JSON array" in result.error
+
+
+def test_grade_matching_non_json_is_failed():
+    client = FakeClient(["sorry, I can't"])
+
+    result = harness.grade_matching_scenario(SCENARIO, client)
+
+    assert result.status == "failed"
+    assert "non-JSON" in result.error
+
+
+def test_grade_matching_api_error_is_errored():
+    client = FakeClient([RuntimeError("connection reset")])
+
+    result = harness.grade_matching_scenario(SCENARIO, client)
+
+    assert result.status == "errored"
+    assert "connection reset" in result.error
