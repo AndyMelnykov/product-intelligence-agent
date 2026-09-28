@@ -1,0 +1,36 @@
+# Derived from real r/oracle posts, June-August 2026. DRAFT pending human review.
+# TOPIC-0001 from 1v478kg, TOPIC-0002 from 1ueggka; candidates from 1vvqmzu, 1uu4win, 1v2be33 and 1u9slpe.
+name: oracle_free_tier
+existing_topics:
+  - topic_id: TOPIC-0001
+    name: "Always Free instances disabled or terminated"
+    description: "OCI Always Free A1 instances get disabled and then terminated by the system with a 'contact support to re-enable' error"
+  - topic_id: TOPIC-0002
+    name: "Free-tier users can't reach Oracle support"
+    description: "Free-tier Oracle Cloud users have no working channel to contact support or recover their accounts"
+candidates:
+  - signal_type: reliability_issue
+    summary: "After the Free Tier A1 shape was reduced to 2 OCPU / 12 GB, the user's instance was deactivated and won't accept a shape change"
+  - signal_type: usability_issue
+    summary: "Free-tier user can't find any way to contact Oracle support to unlock port 25"
+  - signal_type: churn_related_issue
+    summary: "New free-trial user's account was suspended without notice or reason, and support won't say why or return their data"
+  - signal_type: usability_issue
+    summary: "Oracle Cloud signup blocks the credit card field after several failed card attempts"
+expected:
+  - index: 0
+    matched_topic_id: TOPIC-0001
+  - index: 1
+    matched_topic_id: TOPIC-0002
+  - index: 2
+    matched_topic_id: null
+    new_topic:
+      name: "Oracle Cloud accounts suspended without explanation"
+  - index: 3
+    matched_topic_id: null
+    new_topic:
+      name: "Oracle Cloud signup blocked after failed card attempts"
+notes: >
+  Candidate 0 is a real second report of the same disabled-instance error, triggered by
+  the shape change. Candidate 2 overlaps both topics (support, and loss of resources) but
+  is a distinct account-suspension problem -- the hard case. REVIEW.

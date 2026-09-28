@@ -1,0 +1,31 @@
+# Derived from real r/PostgreSQL, r/postgres and r/Database posts, June-August 2026. DRAFT pending human review.
+# TOPIC-0001 from 1vgzx5n, TOPIC-0002 from 1vv5bsl; candidates from 1tthkw9, 1w1uuw5 and 1vgdj64.
+name: managed_postgres_limits
+existing_topics:
+  - topic_id: TOPIC-0001
+    name: "Managed Postgres pricing is high and unpredictable"
+    description: "Users find AWS RDS-style managed Postgres bills add up fast (instance, storage, IOPS, backups, transfer) and look for cheaper hosts"
+  - topic_id: TOPIC-0002
+    name: "Outgrowing managed Postgres free tiers"
+    description: "Apps hit free-tier limits (connections, pauses, throttling) and need an affordable paid managed Postgres"
+candidates:
+  - signal_type: switching_intent
+    summary: "Exceeded Prisma Postgres's 100k-operation free-tier limit in a day; looking for a cheap managed alternative"
+  - signal_type: customer_migration_intent
+    summary: "Startup moving a 400 GB Amazon RDS Postgres database out because the AWS bill reached about $9k"
+  - signal_type: reliability_issue
+    summary: "Neon Postgres 18 rejects an INSERT under an RLS WITH CHECK policy that the row actually satisfies"
+expected:
+  - index: 0
+    matched_topic_id: TOPIC-0002
+  - index: 1
+    matched_topic_id: TOPIC-0001
+  - index: 2
+    matched_topic_id: null
+    new_topic:
+      name: "RLS WITH CHECK wrongly rejects valid inserts on Neon"
+notes: >
+  Candidates 0 and 1 each belong to a different existing topic despite both being
+  cost-driven moves -- tests picking the right topic, not just "some pricing topic".
+  Candidate 1's signal_type differs from TOPIC-0001's source. Candidate 2 is the same
+  platform family but unrelated.
