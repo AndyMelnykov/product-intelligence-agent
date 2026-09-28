@@ -1,0 +1,29 @@
+# Derived from real r/mysql, r/SQL and r/postgres posts, June-August 2026. DRAFT pending human review.
+# TOPIC-0001 from 1vegulm, TOPIC-0002 from 1uvg6kc; candidates from 1vp2bet, 1v2evgb and 1u97vxk.
+name: sql_client_pain_points
+existing_topics:
+  - topic_id: TOPIC-0001
+    name: "MySQL Workbench crashes on macOS"
+    description: "MySQL Workbench keeps crashing on Apple Silicon Macs on recent macOS versions, even after reinstalling"
+  - topic_id: TOPIC-0002
+    name: "pgAdmin lag and clunky web UI"
+    description: "pgAdmin feels slow and clunky because of its web-based UI, prompting users to look for lighter clients"
+candidates:
+  - signal_type: reliability_issue
+    summary: "MySQL Workbench kept crashing on Apple Silicon, so the developer built a native macOS alternative"
+  - signal_type: usability_issue
+    summary: "pgAdmin's clunky web-UI feel becomes unbearable with larger schemas; DBeaver feels bloated as the replacement"
+  - signal_type: switching_intent
+    summary: "Beginner leaving MySQL Workbench because it is no longer actively maintained and isn't available on Linux Mint"
+expected:
+  - index: 0
+    matched_topic_id: TOPIC-0001
+  - index: 1
+    matched_topic_id: TOPIC-0002
+  - index: 2
+    matched_topic_id: null
+    new_topic:
+      name: "MySQL Workbench maintenance and Linux availability"
+notes: >
+  Candidate 2 names the same product as TOPIC-0001 but a different problem (maintenance /
+  platform support, not crashes) -- exercises "same product is not the same topic".

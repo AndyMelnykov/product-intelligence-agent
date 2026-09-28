@@ -1,0 +1,27 @@
+# Derived from real r/PostgreSQL posts, June-August 2026. DRAFT pending human review.
+# TOPIC-0001 comes from 1vgzx5n; candidates from 1v8uvtb, 1vo1ps2 and 1vau5yt.
+name: managed_postgres_pricing
+existing_topics:
+  - topic_id: TOPIC-0001
+    name: "Managed Postgres pricing is high and unpredictable"
+    description: "Users find AWS RDS-style managed Postgres bills add up fast (instance, storage, IOPS, backups, transfer) and look for cheaper, predictably priced managed hosts"
+candidates:
+  - signal_type: pricing_complaint
+    summary: "Wants a simple, affordable managed Postgres with predictable monthly pricing for a small production app, without RDS-level costs"
+  - signal_type: pricing_complaint
+    summary: "Looking for a managed Postgres host that is affordable but reliable, avoiding RDS/Cloud SQL pricing"
+  - signal_type: pricing_complaint
+    summary: "Global Postgres read replicas are unaffordable for a young app; considering SQLite to cut latency cheaply"
+expected:
+  - index: 0
+    matched_topic_id: TOPIC-0001
+  - index: 1
+    matched_topic_id: TOPIC-0001
+  - index: 2
+    matched_topic_id: null
+    new_topic:
+      name: "Affordable global read replicas for Postgres"
+notes: >
+  Candidates 0 and 1 are the same recurring "affordable managed Postgres" ask and should
+  fold into TOPIC-0001. Candidate 2 is also a pricing complaint but about multi-region
+  replication latency, not base hosting cost. REVIEW: this is the judgement call.
