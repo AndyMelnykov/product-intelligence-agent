@@ -808,3 +808,733 @@ examples:
       skip: true
     notes: |
       Low-effort one-line news post about an executive's retirement.
+
+  - id: rd-029
+    source_url: https://www.reddit.com/r/mysql/comments/1vluuq4/  # posted 2026-08-11
+    evidence:
+      title: "Why doesn't MySQL have a median function?"
+      content: |
+        I was a bit surprised that MySQL Workbench has no built-in median function similar to AVG, SUM etc. The current way to get the median is to write a fairly lengthy query (compared to simply using the aggragate functions),  is there a particular reason why it hasn't been implemented?
+    expected:
+      skip: false
+      signal_type: new_feature_demand
+      entity:
+        company: "Oracle"
+      effective_date: null
+    reference_summary: |
+      User is surprised MySQL has no built-in MEDIAN aggregate like AVG or SUM and asks why, since computing a median needs a lengthy query.
+    notes: |
+      Clean new_feature_demand. The user attributes it to 'MySQL Workbench', but the missing function is in MySQL itself. REVIEW entity: 'Oracle' vs 'MySQL'.
+
+  - id: rd-030
+    source_url: https://www.reddit.com/r/mariadb/comments/1vgs1p1/  # posted 2026-08-06
+    evidence:
+      title: "Necesito un admin. grafico para mariadb (modo oracle)"
+      content: |
+        Como dice el texto, estoy experimentando con mariadb (EN MODO ORACLE) para migrar una software que usa oracle de forma pesada... (Muchos Stored Procedures, Packages, Triggers, etc)....
+        Hasta el momento no puedo encontrar ningun editor de mariadb que me permita editar packages y package bodys (para el mariadb en modo oracle). Alguien sabe alguno ?
+    expected:
+      skip: false
+      signal_type: new_feature_demand
+      entity:
+        company: "MariaDB"
+      effective_date: null
+    reference_summary: |
+      Developer testing MariaDB in Oracle compatibility mode to migrate an Oracle-heavy app can't find any GUI editor that supports editing packages and package bodies.
+    notes: |
+      Spanish-language post -- tests non-English input; the summary may come back in either language. REVIEW entity: the gap is in GUI tools, not MariaDB itself, so null is defensible.
+
+  - id: rd-031
+    source_url: https://www.reddit.com/r/Database/comments/1w19yl1/  # posted 2026-08-29
+    evidence:
+      title: "Looking for MySQL GUI Software"
+      content: |
+        That can:
+        \- Copy to Database to Different Host/Database
+
+        \- Copy "Create table" Query
+
+        Currently im using SQLyog, 13.1.1 looking for free MySQL GUI software that have similar feature, because im planning to upgrade my current MySQL to version 9, which is not supported with my current SQLyog version
+    expected:
+      skip: false
+      signal_type: switching_intent
+      entity:
+        product: "SQLyog"
+      effective_date: null
+    reference_summary: |
+      User's SQLyog 13.1.1 doesn't support MySQL 9, so ahead of an upgrade they want a free MySQL GUI that can copy databases between hosts and copy CREATE TABLE statements.
+    notes: |
+      Switching forced by version incompatibility. new_feature_demand is also plausible.
+
+  - id: rd-032
+    source_url: https://www.reddit.com/r/PostgreSQL/comments/1v4lcy2/  # posted 2026-07-23
+    evidence:
+      title: "Install postgresql 18 client/utilities only on a shared drive"
+      content: |
+        Is there a way to install just psql and other client utilities like pgdump in a specific directory?
+
+        I wanted to install the client in a shared drive to be accessed by whichever server i mount it to.
+
+        This is a redhat linux install.
+
+        thanks.
+    expected:
+      skip: false
+      signal_type: new_feature_demand
+      entity:
+        product: "PostgreSQL"
+      effective_date: null
+    reference_summary: |
+      Admin wants to install only the PostgreSQL 18 client utilities (psql, pg_dump) into a shared directory on RHEL so multiple servers can use them.
+    notes: |
+      Borderline: could be read as a plain how-to question (skip). REVIEW entity: the model may say 'PostgreSQL 18'.
+
+  - id: rd-033
+    source_url: https://www.reddit.com/r/mysql/comments/1tx042i/  # posted 2026-06-04
+    evidence:
+      title: "External MariaDB contributors alone now outnumber ALL MySQL contributors combined"
+      content: |
+        Georgi Kodinov ran the numbers on the MariaDB and MySQL git repositories — distinct committers per quarter since Q1 2025.
+
+        The result: external contributors to MariaDB (i.e. not MariaDB employees) alone outnumber the total contributor count to MySQL including Oracle employees.
+
+        The methodology is fully transparent — the shell script is right there in the post, you can run it yourself on your own clone.
+
+        There's an honest caveat too: some MariaDB colleagues push using personal emails, which slightly inflates the external count. But even accounting for that, the gap is real.
+
+        This is what community-driven development looks like.
+
+        [https://mariadb.org/the-power-of-the-community/](https://mariadb.org/the-power-of-the-community/)
+    expected:
+      skip: false
+      signal_type: competitor_mention_rising
+      entity:
+        company: "MariaDB"
+      effective_date: null
+    reference_summary: |
+      Git-history analysis shows external (non-employee) MariaDB contributors alone now outnumber all MySQL contributors, Oracle employees included.
+    notes: |
+      Competitive-momentum signal for MariaDB vs MySQL. Note it is MariaDB-Foundation-sourced content.
+
+  - id: rd-034
+    source_url: https://www.reddit.com/r/mysql/comments/1v78rdm/  # posted 2026-07-26
+    evidence:
+      title: "Why is MySQL faster than MariaDB?"
+      content: |
+        I'm running WordPress so I need a database backend. I'm deciding between MySQL and MariaDB.
+
+        ```
+        mysql > SELECT BENCHMARK(5000000, AES_ENCRYPT(CONCAT(‘WPHostingBenchmarks.com’,RAND()), LEFT(SHA2(‘is part of Review Signal.com’,256), 16)));
+        1 row in set (15.815 sec)
+
+        MariaDB > SELECT BENCHMARK(5000000, AES_ENCRYPT(CONCAT(‘WPHostingBenchmarks.com’,RAND()), LEFT(SHA2(‘is part of Review Signal.com’,256), 16)));
+        1 row in set (23.094 sec)
+        ```
+
+        I use this query because this query is https://github.com/kevinohashi/WPPerformanceTester, which tests key performance for WordPress.
+
+        Isn't it a concensus that MariaDB is faster than MySQL?
+
+        See the concensus:
+        - https://mariadb.com/reference/mariadb-vs-mysql-comparison-guide-enterprise-features-security-2026/
+        - https://www.reddit.com/r/mysql/comments/1ggbouf/help_me_understand_why_mariadb_is_so_much_faster/
+        - https://www.reddit.com/r/Wordpress/comments/zbx6q3/should_i_use_mariadb_or_mysql_for_my_wordpress/
+        - https://tech-insider.org/mariadb-vs-mysql-2026/
+    expected:
+      skip: false
+      signal_type: competitor_mention_rising
+      entity: null
+      effective_date: null
+    reference_summary: |
+      A WordPress user choosing a database finds MySQL ran an AES benchmark noticeably faster than MariaDB (15.8s vs 23.1s), contradicting the belief that MariaDB is faster.
+    notes: |
+      Head-to-head comparison; entity null because two products are compared equally. REVIEW: this is the weakest fit for any signal type.
+
+  - id: rd-035
+    source_url: https://www.reddit.com/r/Database/comments/1tvdh9b/  # posted 2026-06-03
+    evidence:
+      title: "Anybody having experience with the Huawei databases?"
+      content: |
+        I’m speaking about TaurusDB and GaussDB.
+        They appear to have some enterprise features which the free versions of Postgres and MySQL lack.
+        They are offered as managed service by deutsche telekom cloud, which brought them to my attention.
+    expected:
+      skip: false
+      signal_type: competitor_mention_rising
+      entity:
+        company: "Huawei"
+      effective_date: null
+    reference_summary: |
+      User asks about experience with Huawei's TaurusDB and GaussDB, offered as managed services by Deutsche Telekom cloud, which seem to have enterprise features that free Postgres and MySQL lack.
+    notes: |
+      An emerging competitor that is new to this audience.
+
+  - id: rd-036
+    source_url: https://www.reddit.com/r/mysql/comments/1ue0n2b/  # posted 2026-06-24
+    evidence:
+      title: "MySql Workbench Not Opening"
+      content: |
+        Hi, I'm a complete beginner learning to use SQL. I tried opening mysql workbench after a while of not using it, and it just never started. I tried deleting and downloading it twice and nothing has changed. Though something weird is that the MySql Workbench folder never disappeared and I can't delete it even after I deleted the content inside it, so this may be related to what's happening.
+    expected:
+      skip: false
+      signal_type: reliability_issue
+      entity:
+        company: "Oracle"
+      effective_date: null
+    reference_summary: |
+      MySQL Workbench no longer starts for a beginner even after deleting and reinstalling it twice; the install folder can't be deleted.
+    notes: |
+      Pairs with rd-003 (the macOS crash) for duplicate-topic testing.
+
+  - id: rd-037
+    source_url: https://www.reddit.com/r/mysql/comments/1vsnsk8/  # posted 2026-08-19
+    evidence:
+      title: "Is MySQL Connector/J 26.7.0 a proper LTS release that is officially out?"
+      content: |
+        I'm looking at updating the MySQL Connector/J in a project of ours. The latest version I can find is **26.7.0**. Is that a proper LTS release that is officially out?
+
+        The reason I ask is that the release notes are titled ***"Changes in MySQL Connector/J 26.7.0 (Not yet released)"***.
+
+        [https://dev.mysql.com/doc/relnotes/connector-j/en/news-26-7-0.html](https://dev.mysql.com/doc/relnotes/connector-j/en/news-26-7-0.html)
+
+        We use maven, and the release 26.7.0 can be found there:
+
+        [https://mvnrepository.com/artifact/com.mysql/mysql-connector-j/26.7.0](https://mvnrepository.com/artifact/com.mysql/mysql-connector-j/26.7.0)
+
+        [https://central.sonatype.com/artifact/com.mysql/mysql-connector-j](https://central.sonatype.com/artifact/com.mysql/mysql-connector-j)
+    expected:
+      skip: false
+      signal_type: usability_issue
+      entity:
+        company: "Oracle"
+      effective_date: null
+    reference_summary: |
+      MySQL Connector/J 26.7.0 is on Maven Central but its release notes still say 'Not yet released', leaving the user unsure whether it is an official LTS release.
+    notes: |
+      Release/documentation confusion, not a bug.
+
+  - id: rd-038
+    source_url: https://www.reddit.com/r/oracle/comments/1ueggka/  # posted 2026-06-24
+    evidence:
+      title: "Oracle free tier account recovery is a joke"
+      content: |
+        Small nonprofit here. We used Oracle Cloud Free Tier for a few months in 2024, and then need for the workload ended, so we moved on.  today I tried to log back in and our credentials don't work (both the Cloud and Oracle portals).
+
+        Fine, reset the password. Except the reset email never comes. Forgot username? That email doesn't come either. Phone support only handles existing tickets and just tells you to use the portal (login required). There is no support email. Tried to create a new account with the same email, but it says the email is already taken.
+
+        You literally can't get into your account without being logged in. That's it - that's the whole loop.
+
+        What's extra annoying is that they are very clear about not creating multiple accounts, but what do you expect us to do??
+
+        I created a new account with a different email (just an alias), and it worked immediately, so it's not our spam filter, something is just broken on their end for our original account, with no way to diagnose it and no humans to contact.
+
+        For paid customers I'm sure there's some path, but for free tier you're just screwed. Recreate everything and don't expect to ever use your original email again, I guess.
+
+        I suppose I'm hoping someone from Oracle sees this and fixes their process.
+    expected:
+      skip: false
+      signal_type: usability_issue
+      entity:
+        company: "Oracle"
+      effective_date: null
+    reference_summary: |
+      A nonprofit can't recover its old Oracle Cloud Free Tier account: password and username reset emails never arrive, and phone support requires a portal login, so it's an impossible loop.
+    notes: |
+      Account-recovery usability. The nonprofit already left, so churn_related_issue is arguable.
+
+  - id: rd-039
+    source_url: https://www.reddit.com/r/oracle/comments/1urzzws/  # posted 2026-07-09
+    evidence:
+      title: "Oracle Support is Garbage"
+      content: |
+        Just wanted to say your automated\\chat "Customer Support" system is absolute garbage and we will be ditching your service as soon as possible. I'll explain below.
+    expected:
+      skip: false
+      signal_type: churn_related_issue
+      entity:
+        company: "Oracle"
+      effective_date: null
+    reference_summary: |
+      User says Oracle's automated chat customer support is garbage and that they will be ditching the service as soon as possible.
+    notes: |
+      Explicit churn statement. The promised explanation never follows ('I'll explain below' and then nothing).
+
+  - id: rd-040
+    source_url: https://www.reddit.com/r/oracle/comments/1v478kg/  # posted 2026-07-23
+    evidence:
+      title: "Always Free A1 Instance Disabled & Terminated After Free Trial Expiration – Need Help"
+      content: |
+        Hi Community,
+
+        I'm hoping someone here has experienced something similar or can point me in the right direction.
+
+        **What happened:**
+
+        My OCI Free Trial expired on **July 19, 2026**, and immediately afterwards, my Always Free **VM.Standard.A1.Flex** instance entered a *Disabled* state. Every attempt to start or modify it returned:
+
+        Instance is disabled and will not accept any action requests. Please contact customer support to re-enable.
+
+        Shortly after, the instance was *terminated* by the system. I never manually terminated it. The console now shows **Resource Not Found** on the instance details page.
+
+        \- Home Region: US East (Ashburn)
+
+        \- Shape: VM.Standard.A1.Flex
+
+        \- Instance OCID: \`ocid1.instance.oc1.iad.<redacted>\`
+
+        **Current situation:**
+
+        The original **150 GB Always Free boot volume** still exists in my tenancy, so the data isn't gone, but I can't attach it to anything useful yet.
+
+        As most of you probably know, getting a new \`VM.Standard.A1.Flex\` in Ashburn is nearly impossible right now due to capacity constraints, which makes this even more frustrating.
+
+        **My questions:**
+
+        1. Is this expected behaviour when a Free Trial ends? Does OCI disable and auto-terminate Always Free instances that were created \*during\* the trial period?
+
+        2. Has anyone successfully recovered an instance in this state (or had Oracle restore/recreate one against an existing boot volume)?
+
+        3. Is there any way to launch a new A1 instance from an existing boot volume once one becomes available, without losing the volume in the meantime?
+
+        Being on free tire i can not raised a support request, but given that OCI community knowledge here is often faster, any insight would be hugely appreciated.
+
+        Now it says >>
+
+        Instance details: Couldn't load the data. Share these values in feedback or support to help troubleshoot the issue. Session ID: csid4faa8fd44af2a2da4e7fd54a2a34 OPC-Request-ID: csid4faa8fd44af2a2da4e7fd54a2a34/c42662c4acf447e99aab24411f069889/32AF23DA040C3C70D4AB86DBFA32EAEB
+
+        Thanks in advance! 🙏
+    expected:
+      skip: false
+      signal_type: reliability_issue
+      entity:
+        company: "Oracle"
+      effective_date: null
+    reference_summary: |
+      After the OCI free trial expired, the user's Always Free A1 instance was disabled and then terminated by the system; the boot volume survives, but new A1 capacity is unavailable and free-tier users can't open support requests.
+    notes: |
+      The instance OCID is redacted. effective_date null: the trial expiry date is an account event, not an announced change. REVIEW: churn_related_issue is also plausible.
+
+  - id: rd-041
+    source_url: https://www.reddit.com/r/oracle/comments/1vv3tys/  # posted 2026-08-22
+    evidence:
+      title: "Accidentally provisioned a 1TB block volume on Pay-As-You-Go ($0 plan) — racked up ~SGD 25 in usage. What are the odds of a courtesy waiver?"
+      content: ""
+    expected:
+      skip: false
+      signal_type: pricing_complaint
+      entity:
+        company: "Oracle"
+      effective_date: null
+    reference_summary: |
+      User accidentally provisioned a 1 TB block volume on Oracle Cloud pay-as-you-go, ran up about SGD 25, and asks about a courtesy waiver.
+    notes: |
+      Title-only post (empty body). REVIEW: this is a billing mishap more than a complaint about pricing.
+
+  - id: rd-042
+    source_url: https://www.reddit.com/r/oracle/comments/1uz0ctz/  # posted 2026-07-17
+    evidence:
+      title: "Oracle E-Business Suite: CVE-2026-46817 is now under active exploitation. Notified by CISA. Added to KEV"
+      content: ""
+    expected:
+      skip: false
+      signal_type: reliability_issue
+      entity:
+        company: "Oracle"
+      effective_date: null
+    reference_summary: |
+      An Oracle E-Business Suite vulnerability, CVE-2026-46817, is under active exploitation and has been added to CISA's KEV catalog.
+    notes: |
+      Title-only security news. No signal type covers security exactly; reliability_issue is the closest. REVIEW: skip is defensible for a news link.
+
+  - id: rd-043
+    source_url: https://www.reddit.com/r/SQL/comments/1u6lrmv/  # posted 2026-06-15
+    evidence:
+      title: "COMPAC Y SQL SERVER 2025"
+      content: |
+        Hola a todos,
+
+        Recientemente estoy intentando conectar CONTPAQi a una nueva instancia de SQL Server 2025.
+
+        La configuración aparentemente está correcta y el sistema logra conectarse sin errores. La instancia de SQL Server se encuentra instalada en un servidor dedicado dentro de la red y no en mi equipo local.
+
+        Sin embargo, al acceder a CONTPAQi desde mi computadora, cualquier operación (consultas, apertura de catálogos, movimientos, etc.) se ejecuta extremadamente lenta, aunque el sistema funciona y no muestra errores de conexión.
+
+        ¿Alguien ha experimentado un comportamiento similar o podría orientarme sobre qué aspectos debería revisar? Estoy considerando temas relacionados con red, configuración de SQL Server, compatibilidad con SQL Server 2025 o algún parámetro de CONTPAQi que pudiera estar afectando el rendimiento.
+
+        Agradecería mucho cualquier sugerencia o experiencia que puedan compartir.
+
+        ¡Muchas gracias por su apoyo!
+    expected:
+      skip: false
+      signal_type: reliability_issue
+      entity:
+        company: "Microsoft"
+      effective_date: null
+    reference_summary: |
+      CONTPAQi connects to a new SQL Server 2025 instance on a network server without errors, but every operation runs extremely slowly.
+    notes: |
+      Spanish-language post. Slowness could be CONTPAQi or network, not SQL Server. REVIEW entity: 'CONTPAQi' is plausible.
+
+  - id: rd-044
+    source_url: https://www.reddit.com/r/SQL/comments/1vgdj64/  # posted 2026-08-05
+    evidence:
+      title: "Neon Guidance on why an INSERT is rejected?"
+      content: |
+        Detail on my issue below: (Postgrese)
+
+        **Environment:** Postgres 18 (Neon), project `dry-bar-XXXXXXX`, org plan Launch (previously Free — same behavior on both). Reproduced identically across: two independently-forked disposable branches, a fresh branch created after upgrading to Launch, and real production itself (using an existing, long-lived person/role — not freshly created data).
+
+        **Summary:** An `INSERT` is rejected with `new row violates row-level security policy for table "X"` even though the row's values genuinely satisfy the policy's `WITH CHECK` expression — confirmed by a `BEFORE INSERT` trigger, in the same statement execution, immediately preceding Postgres's own documented WITH CHECK evaluation point, which independently evaluates the identical boolean expression against the identical row and gets `true`.
+    expected:
+      skip: false
+      signal_type: reliability_issue
+      entity:
+        company: "Neon"
+      effective_date: null
+    reference_summary: |
+      On Neon Postgres 18, an INSERT is rejected by a row-level-security WITH CHECK policy even though a BEFORE INSERT trigger confirms the row satisfies the same expression; reproduced across branches and plans.
+    notes: |
+      Could be a Postgres behavior rather than Neon-specific. REVIEW entity.
+
+  - id: rd-045
+    source_url: https://www.reddit.com/r/Database/comments/1uc9294/  # posted 2026-06-22
+    evidence:
+      title: "Vitess ETL"
+      content: |
+        Hi guys, I am currently quite stuck with Vitess (sharded MySQL).
+
+        Our company use Vitess in PlanetScale to tackle the depolyment downtime. But we didn't see the operation overhead from it, especially related to Data Analytics task.
+
+        We just noticed Vitess is lacking in ETL support everywhere. Previously we thought, oh this is just MySQL. No it's not. The binlog is different, and for ETL they use Vstream and Vreplication. Completely different species.
+
+        This makes the Data Pipeline cost so high. Supply is low, we can't negotiate much for price. Out best bet is to self deploy maybe Debezium or Airbytes, but our team is quite small and really have to think of the operational overhead.
+
+        Does any of you guys have experience in self host Vitess ETL? What's the easiest and worth the price? Thanks!
+    expected:
+      skip: false
+      signal_type: usability_issue
+      entity:
+        company: "PlanetScale"
+      effective_date: null
+    reference_summary: |
+      A team on Vitess via PlanetScale finds that ETL/CDC support is lacking (VStream instead of the MySQL binlog), making data pipelines costly, and weighs self-hosting Debezium or Airbyte.
+    notes: |
+      Could be new_feature_demand or pricing_complaint. REVIEW entity: 'Vitess' as product is plausible.
+
+  - id: rd-046
+    source_url: https://www.reddit.com/r/Database/comments/1w1uuw5/  # posted 2026-08-29
+    evidence:
+      title: "Data migration from AWS to google drive  advise plzzzzz"
+      content: |
+        I'm an IT intern in a US startup mi task is to migrate the DB (actually stored in Amazon RDS postgres) to google drive API (like backup due to the billing in the aws around 9k ! ) the problem is the size (around 400 GB) so I think the pg\_dump to generate the script is not a solution for my case
+
+        Is there any solution ! And howa I can verify the integrity ? ( Hashing a file 200 gb is crazy !!!)
+
+        Can we generate the script in a small chunks ??? Without losing the relations between tables and tge constraints ?
+    expected:
+      skip: false
+      signal_type: customer_migration_intent
+      entity:
+        company: "Amazon Web Services"
+      effective_date: null
+    reference_summary: |
+      Startup intern must move a 400 GB Amazon RDS Postgres database out to Google Drive storage because the AWS bill is around $9k, and asks how to dump it in chunks and verify integrity.
+    notes: |
+      Migration driven by cost; pricing_complaint is also plausible. REVIEW.
+
+  - id: rd-047
+    source_url: https://www.reddit.com/r/postgres/comments/1tthkw9/  # posted 2026-06-01
+    evidence:
+      title: "Managed postgres alternatives to Prisma"
+      content: |
+        What are some good/cheap managed postgres alternatives to Prisma?
+
+        I have a project (a domain directory) - that is light on data (few thousand entries) - but lot of read/update operations.
+
+        I was on the Prisma free tier that has a 100,000 operation limit - but I exceeded that limit in just a day.
+
+        How is Neon/Railway/Digital ocean? Any other options I should look at?
+
+        I don't need auth/file storage etc like supabase.
+    expected:
+      skip: false
+      signal_type: switching_intent
+      entity:
+        company: "Prisma"
+      effective_date: null
+    reference_summary: |
+      User blew through Prisma Postgres's 100k-operation free-tier limit in a day and wants a cheap managed Postgres alternative (Neon, Railway, DigitalOcean).
+    notes: |
+      Clear switching_intent triggered by free-tier limits.
+
+  - id: rd-048
+    source_url: https://www.reddit.com/r/SQL/comments/1ueoeih/  # posted 2026-06-24
+    evidence:
+      title: "AWS Glue crawler creating CSV table incorrectly and splitting quoted fields with commas"
+      content: |
+        I'm running into an issue with an AWS Glue crawler and I'm not sure if the problem is the crawler, classifier, or the source file.
+
+        I have two CSV datasets with what appears to be the same structure. One dataset is crawled correctly and the other is not.
+
+        The CSV contains values like:
+
+            12345,"Smith, John",98765
+
+        The older table was created as:
+
+            ROW FORMAT SERDE 'org.apache.hadoop.hive.serde2.OpenCSVSerde'
+
+        and correctly keeps `"Smith, John"` in a single column.
+
+        The newer table is consistently created as:
+
+            ROW FORMAT DELIMITED
+            FIELDS TERMINATED BY ','
+
+        with table properties showing:
+
+            classification='csv'
+            areColumnsQuoted='false'
+
+        As a result, fields containing commas are split across columns. For example:
+
+            name_field = Smith
+            id_field = John
+
+        instead of:
+
+            name_field = Smith, John
+
+        What I've already tried:
+
+        * Deleted the Glue table entirely
+        * Re-ran the crawler
+        * Removed a custom classifier that was previously attached
+        * Added a CSV classifier with:
+           * Delimiter = comma
+           * Quote symbol = double quote
+        * Deleted and recreated the table through the crawler multiple times
+
+        The crawler still recreates the table as:
+
+            ROW FORMAT DELIMITED
+
+        and continues setting:
+
+            areColumnsQuoted='false'
+
+        The crawler is configured to recrawl all files. The source file definitely contains quoted values with embedded commas.
+
+        My questions are:
+
+        1. Has anyone seen Glue infer a CSV this way even when quoted fields exist?
+        2. Is there a way to force OpenCSVSerde during crawler creation?
+        3. Are there known file characteristics that cause Glue to ignore quoted fields and fall back to a simple delimited format?
+        4. Is there a way to debug why Glue is deciding `areColumnsQuoted=false`?
+
+        Any ideas would be appreciated. I've spent quite a bit of time changing classifiers and recreating the table but the crawler continues to generate the same table definition.
+    expected:
+      skip: false
+      signal_type: reliability_issue
+      entity:
+        company: "Amazon Web Services"
+      effective_date: null
+    reference_summary: |
+      An AWS Glue crawler keeps creating a CSV table with the simple delimited format (areColumnsQuoted=false), splitting quoted fields that contain commas, even with a custom quote-aware classifier.
+    notes: |
+      Reproducible misbehavior despite workarounds.
+
+  - id: rd-049
+    source_url: https://www.reddit.com/r/mysql/comments/1vpdcwv/  # posted 2026-08-15
+    evidence:
+      title: "More fun with moving MyISAM to InnoDB (just so you can laugh at my pain)"
+      content: |
+        If there's anybody that will appreciate this drama, it's y'all!
+
+        Quick backstory, I build this database sometime around 2004. It was all MyISAM until I added a couple of InnoDB tables around 2018-19. Then in 2021 I had a MAJOR crash that was related to InnoDB, so I put it all back to MyISAM and had to set \`innodb\_force\_recovery=5\` to get it back online.
+
+        Now I'm setting up a new server, and I'm altering it all to InnoDB while holding my breath and praying.
+
+        So early this morning (1am-ish) I was working on a table and created a FULLTEXT index, which threw an error. I altered it to InnoDB again to make sure there were no errors, optimized, etc, before realizing that the default /tmp/ directory was too small. So I set a new \`tmpdir\` in my.cnf and the new index built.
+
+        But then I saw that the old MyISAM table had 507,000 rows, while the live one only had 467,000! Somehow I'd lost 40,000 rows :-O
+
+        I went through EVERYTHING, even down to restoring full database backups. Nope, still missing.
+
+        THREE HOURS of late-night panic coding until it hits me... in phpMyAdmin, that \`Showing rows 0 - 24 (467000 total...)\` isn't accurate in InnoDB! So I do a simple \`SELECT \*...\`, and... yep, it's all good. Same number of rows after all.
+
+        So there I am, almost 5am, heart racing, and it turns out that it was right all along.
+    expected:
+      skip: false
+      signal_type: usability_issue
+      entity:
+        product: "phpMyAdmin"
+      effective_date: null
+    reference_summary: |
+      While converting a 2004-era MyISAM database to InnoDB, the user panicked for hours over 40,000 'missing' rows, which turned out to be phpMyAdmin's inaccurate InnoDB row-count estimate.
+    notes: |
+      Subtle: it reads like data loss but ends as a misleading-UI story. REVIEW: skip is defensible (a humorous war story).
+
+  - id: rd-050
+    source_url: https://www.reddit.com/r/PostgreSQL/comments/1w2nsh0/  # posted 2026-08-30
+    evidence:
+      title: "DuckLake was 41x faster than Iceberg for our Postgres CDC workload"
+      content: |
+        Adding some context. This came from a problem I ran into while managing the Postgres team at Cloudflare: BI teams want to run long running queries, so our solution was to spin up dedicated read replicas. As we know, there are still tradeoffs because of \`hot\_standby\_feedback\` or \`max\_standby\_streaming\_delay\`.
+
+        Streambed started as: Postgres WAL → S3 → query from psql
+
+        Iceberg was the first target, but real world CDC shape is more of small batch → commit → small batch → commit.
+
+        Those small commits keep data fresh, but they also create files, manifests, metadata, and copy-on-write work. So I tested DuckLake as a target format.
+
+        One benchmark slice: 1M rows, 100k updates, flush=1,000.
+
+        Iceberg COW: 269s. DuckLake + DuckDB catalog: 6.6s. Roughly 41x faster for this specific Streambed CDC-style workload.
+
+        Caveat: this bypasses Postgres logical replication and psql-wire; it measures the lakehouse writer/catalog path over local MinIO.
+
+        Blog: [https://streambed.dev/blog/ducklake-target-support/](https://streambed.dev/blog/ducklake-target-support/)
+    expected:
+      skip: false
+      signal_type: positive_adoption_pattern
+      entity:
+        product: "DuckLake"
+      effective_date: null
+    reference_summary: |
+      In a Postgres CDC-to-lakehouse workload, DuckLake with a DuckDB catalog was about 41x faster than Iceberg copy-on-write (6.6s vs 269s).
+    notes: |
+      Benchmark by the Streambed author, so partly self-promo. REVIEW.
+
+  - id: rd-051
+    source_url: https://www.reddit.com/r/SQL/comments/1uej0ma/  # posted 2026-06-24
+    evidence:
+      title: "Mobile Phone Market Survey."
+      content: |
+        Hi everyone! We are conducting a short survey to understand consumer preferences and opinions regarding mobile phones. The survey takes only a few minutes, and all responses are for research purposes only. Click on the Link. Your participation would be greatly appreciated. If possible, please share.[Survey Link.](https://qrfy.io/L9IDpk_VR9)
+    expected:
+      skip: true
+    notes: |
+      Off-topic spam: a mobile phone market survey posted to r/SQL.
+
+  - id: rd-052
+    source_url: https://www.reddit.com/r/oracle/comments/1umyy4i/  # posted 2026-07-04
+    evidence:
+      title: "Oracle Kitten"
+      content: ""
+    expected:
+      skip: true
+    notes: |
+      Empty post titled 'Oracle Kitten'.
+
+  - id: rd-053
+    source_url: https://www.reddit.com/r/oracle/comments/1u7g272/  # posted 2026-06-16
+    evidence:
+      title: "Hi"
+      content: ""
+    expected:
+      skip: true
+    notes: |
+      Empty post titled 'Hi'.
+
+  - id: rd-054
+    source_url: https://www.reddit.com/r/oracle/comments/1u2dpmb/  # posted 2026-06-10
+    evidence:
+      title: "ORCL Q4 Earnings: Holy RPO Batman! $638 BILLION backlog (10x annual revenue) and IaaS growing at +93% YoY."
+      content: |
+        **ORCL Q4 Earnings: Holy RPO Batman! $638 BILLION backlog (10x annual revenue) and IaaS growing at +93% YoY. 🚀**
+
+        Oracle just dropped their Q4 and FY2026 earnings report and the numbers are absolutely mind-blowing. While everyone is focused on NVDA, Oracle is quietly becoming the ultimate powerhouse of AI infrastructure monetization.
+
+        Total revenue came in at $19.2B (beating the $19.10B expected) and Non-GAAP EPS completely destroyed expectations at $2.11 versus the $1.96 consensus. But the absolute showstopper here is the Remaining Performance Obligations (RPO), which just hit an astronomical $638 Billion, up 363% year-over-year. To put this into perspective, Oracle’s entire revenue for the full year 2026 just closed at $67.4B, meaning their current backlog is nearly 10 times their annual revenue. Just in the last 90 days, they added $85 Billion in new contract bookings. That means they locked in more future revenue in three months than they normally generate in an entire year, driven by massive multi-year AI scaling contracts with the likes of OpenAI, Microsoft, xAI, and Meta.
+
+        This backlog is translating into real, immediate growth: Cloud Infrastructure (OCI) revenue hit $5.8B, accelerating to an insane +93% YoY. It’s clear that Oracle's RDMA network architecture for NVIDIA clusters has become the gold standard for massive AI training and inference. The only real catch is that building this capacity is incredibly expensive: FY26 Free Cash Flow closed at negative -$23.7 Billion because they are burning through every single dollar to secure GPUs and build data centers. But when you have a $638B guaranteed backlog waiting to be deployed, this is arguably the most justified CapEx spend in tech history. Larry Ellison just delivered a flawless report, proving that Oracle has successfully transformed from a legacy database company into a hyper-growth AI infrastructure play that has already locked in its next decade of growth.
+    expected:
+      skip: true
+    notes: |
+      Stock/earnings hype about ORCL financials, not product feedback.
+
+  - id: rd-055
+    source_url: https://www.reddit.com/r/mariadb/comments/1u0wu95/  # posted 2026-06-09
+    evidence:
+      title: "MariaDB Foundation Sea Lion Champions Nominees: Sumit Srivastava"
+      content: |
+        We have started a new series of interviews presenting the MariaDB Foundation Sea Lion Champions Nominees.
+        Here's Sumit Srivastava's interview. Sumit is nominated in the Adoption & Industry Impact category: [https://mariadb.org/mariadb-foundation-sea-lion-champions-nominees-sumit-srivastava/](https://mariadb.org/mariadb-foundation-sea-lion-champions-nominees-sumit-srivastava/)
+    expected:
+      skip: true
+    notes: |
+      MariaDB Foundation community PR (a champion-nominee interview).
+
+  - id: rd-056
+    source_url: https://www.reddit.com/r/mysql/comments/1vmgtqx/  # posted 2026-08-12
+    evidence:
+      title: "MySQL / Mariadb routine debugger"
+      content: |
+        Hi all,
+
+        I’ve released an open-source stored-routine debugger for MySQL and MariaDB, with standalone, VS Code, and NetBeans frontends. It features standard debugging controls like breakpoints, stepping in/out, watches ec...
+
+        I’m looking for testers across different MySQL/MariaDB versions and routine styles. Feedback and compatibility reports are very welcome.
+
+        Github : [https://github.com/rk22-projects/mysql-routine-debugger](https://github.com/rk22-projects/mysql-routine-debugger)
+
+        VS Code marketplace : [https://marketplace.visualstudio.com/items?itemName=RK22.mysql-routine-debugger](https://marketplace.visualstudio.com/items?itemName=RK22.mysql-routine-debugger)
+
+        rk22
+    expected:
+      skip: true
+    notes: |
+      Self-promo release announcement of an open-source routine debugger. REVIEW: same judgement call as rd-026.
+
+  - id: rd-057
+    source_url: https://www.reddit.com/r/oracle/comments/1vskogs/  # posted 2026-08-19
+    evidence:
+      title: "Well, thanks for the support oracle."
+      content: ""
+    expected:
+      skip: true
+    notes: |
+      Sarcastic title-only post ('thanks for the support oracle') with no content. REVIEW: arguably a support complaint, but there is nothing to extract.
+
+  - id: rd-058
+    source_url: https://www.reddit.com/r/oracle/comments/1u1ug4i/  # posted 2026-06-10
+    evidence:
+      title: "Is moving from oracle right move ?"
+      content: ""
+    expected:
+      skip: true
+    notes: |
+      Title-only question ('Is moving from oracle right move?') with no context. REVIEW: switching_intent is arguable.
+
+  - id: rd-059
+    source_url: https://www.reddit.com/r/mariadb/comments/1v2dasb/  # posted 2026-07-21
+    evidence:
+      title: "From PostgreSQL 12 to MariaDB 11: lessons from a gradual fintech migration"
+      content: |
+        We wrote a case study about a fintech company that migrated from a large monolithic PostgreSQL 12 environment to MariaDB 11.
+
+        Instead of performing a big-bang cutover, the team migrated tables and partitions individually, using CDC, dual writes, consistency checks, and query routing while PostgreSQL remained the default system.
+
+        The migration took approximately one year and resulted in 23% lower TCO, faster analytical queries, and a reported 20% improvement in time-to-market.
+
+        The article covers the architecture, why a PostgreSQL upgrade alone was not considered sufficient, the role of InnoDB, ColumnStore, Galera and Otterstax, the SQL compatibility work, and the trade-offs encountered during the project.
+
+        I would be interested to hear how others have approached gradual migrations between different database engines.
+    expected:
+      skip: true
+    notes: |
+      Vendor-written case study (PostgreSQL 12 to MariaDB 11 migration). REVIEW: customer_migration_intent is defensible if vendor content counts.
+
+  - id: rd-060
+    source_url: https://www.reddit.com/r/mysql/comments/1uk2m25/  # posted 2026-06-30
+    evidence:
+      title: "Wait, MySQL 28.4? Did I just sleep through 20 years of database releases?"
+      content: |
+        If you recently saw people talking about **MySQL 28.4** and thought you accidentally pulled a Rip Van Winkle, don't panic. You didn't sleep through two decades, and your server didn't spontaneously evolve.
+
+        Check more here: [https://comunidademysql.com.br/novo-versionamento-mysql-28-4-atualizar/](https://comunidademysql.com.br/novo-versionamento-mysql-28-4-atualizar/)
+    expected:
+      skip: true
+    notes: |
+      Link-only post about MySQL's new version numbering, no feedback.
