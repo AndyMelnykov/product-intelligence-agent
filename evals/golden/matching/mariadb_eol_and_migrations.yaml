@@ -1,0 +1,28 @@
+# Derived from real r/mariadb and r/PostgreSQL posts, June-August 2026. DRAFT pending human review.
+# TOPIC-0001 from 1v0mzbd; candidates from 1u7c6yc, 1v8egj4 and 1u6aa0l.
+name: mariadb_eol_and_migrations
+existing_topics:
+  - topic_id: TOPIC-0001
+    name: "MariaDB 10.6 end of life"
+    description: "MariaDB Community Server 10.6 reached end of life on 2026-07-06; no more security patches, users must upgrade"
+candidates:
+  - signal_type: customer_migration_intent
+    summary: "MariaDB Foundation announces MariaDB Server 10.6 reaches end of life on July 6th"
+  - signal_type: positive_adoption_pattern
+    summary: "Adobe Commerce makes MariaDB its default database; 2.4.8/2.4.9 will be the last releases supporting MySQL"
+  - signal_type: customer_migration_intent
+    summary: "Team plans to move a production MariaDB Galera cluster to PostgreSQL and asks where to start"
+expected:
+  - index: 0
+    matched_topic_id: TOPIC-0001
+  - index: 1
+    matched_topic_id: null
+    new_topic:
+      name: "Adobe Commerce standardizes on MariaDB"
+  - index: 2
+    matched_topic_id: null
+    new_topic:
+      name: "Migrating from MariaDB to PostgreSQL"
+notes: >
+  Candidate 0 is the same EOL event announced two weeks earlier -- a real duplicate. Candidate 2
+  shares entity and signal_type with TOPIC-0001 but is a move off MariaDB, not an upgrade.

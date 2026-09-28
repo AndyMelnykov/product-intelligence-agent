@@ -1,0 +1,28 @@
+# Derived from real r/oracle posts, June-August 2026. DRAFT pending human review.
+# TOPIC-0001 from 1u6fuiq, TOPIC-0002 from 1ueexvl; candidates from 1ufy26g and 1uvf8tj.
+name: oracle_all_new
+existing_topics:
+  - topic_id: TOPIC-0001
+    name: "My Oracle Support portal is hard to use"
+    description: "The redesigned MOS site has poor search, hard-to-find patches, frequent re-authentication and an unhelpful AI assistant"
+  - topic_id: TOPIC-0002
+    name: "Oracle 23.26 optimizer returns wrong results"
+    description: "The cost-based optimizer in 23.26.0.0 drops NULL rows from simple IS NULL OR predicates"
+candidates:
+  - signal_type: usability_issue
+    summary: "Oracle Cloud pay-as-you-go upgrade is stuck because the SalesHelp email for changing the account legal name was discontinued"
+  - signal_type: reliability_issue
+    summary: "Oracle APEX on the free-tier 26ai Autonomous Database fills 100% of storage with runaway unified audit data"
+expected:
+  - index: 0
+    matched_topic_id: null
+    new_topic:
+      name: "Oracle Cloud account admin blocked by discontinued support channel"
+  - index: 1
+    matched_topic_id: null
+    new_topic:
+      name: "Unified audit storage runaway on free-tier Autonomous Database"
+notes: >
+  Every candidate shares the vendor and a signal_type with an existing topic but is a
+  different issue, so nothing should match. Candidate 0 is the hard one: it is about
+  Oracle support, but account/billing admin, not the MOS knowledge portal. REVIEW.

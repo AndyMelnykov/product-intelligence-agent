@@ -1,0 +1,810 @@
+# Real Reddit posts, June-August 2026, from r/SQL, r/learnSQL, r/Database, r/PostgreSQL,
+# r/postgres, r/mysql, r/mariadb, r/oracle (pulled via the Arctic Shift archive).
+# Labels are DRAFTS pending human review -- 'REVIEW' in notes marks judgement calls.
+product_area: database_development
+examples:
+  - id: rd-001
+    source_url: https://www.reddit.com/r/SQL/comments/1vnsgpu/  # posted 2026-08-14
+    evidence:
+      title: "Top alternatives to Datagrip"
+      content: |
+        Been using DataGrip for a while, but the cost is getting harder to justify when I only use a fraction of what it offers. My setup is pretty mixed: PostgreSQL, Snowflake, and some MySQL.
+
+        I keep seeing DBeaver, DbVisualizer and TablePlus mentioned as alternatives. DBeaver seems like the obvious one, but DbVisualizer caught my attention since it seems geared more toward mixed database environments.
+
+        Main things I care about are a good SQL editor/autocomplete, multiple connections without things getting sluggish, and not having to switch tools depending on the database.
+
+        For anyone who's moved away from DataGrip, what did you end up using and how has it held up?
+    expected:
+      skip: false
+      signal_type: switching_intent
+      entity:
+        company: "JetBrains"
+      effective_date: null
+    reference_summary: |
+      User finds DataGrip's cost hard to justify for the fraction of features they use and is asking which alternative (DBeaver, DbVisualizer, TablePlus) to move to for a mixed PostgreSQL/Snowflake/MySQL setup.
+    notes: |
+      Cost is the trigger, but the post is actively shopping for a replacement, so switching_intent over pricing_complaint. REVIEW: the post names only the product (DataGrip), so the model may leave company null or say 'JetBrains'.
+
+  - id: rd-002
+    source_url: https://www.reddit.com/r/PostgreSQL/comments/1vgzx5n/  # posted 2026-08-06
+    evidence:
+      title: "Is AWS RDS still worth it for Postgres or are there better managed alternatives now?"
+      content: |
+        I've been using RDS Postgres for a while, and I get why people trust it. Backups, patching, monitoring, AWS integration, it handles a lot.
+
+        The pricing is where I'm starting to question it. You pay for the instance, then storage, backups, IOPS, data transfer, Multi-AZ and whatever else your setup needs. The bill adds up fast, and RDS still feels like something you need to keep a close eye on.
+
+        I don't want to self-host Postgres on a VPS. I'm looking for something fully managed, but with clearer pricing and less AWS complexity.
+
+        For anyone who moved away from RDS, what did you switch to? Did it make things noticeably cheaper or easier to manage?
+    expected:
+      skip: false
+      signal_type: pricing_complaint
+      entity:
+        company: "Amazon Web Services"
+      effective_date: null
+    reference_summary: |
+      User questions whether AWS RDS for Postgres is worth it because the stacked charges (instance, storage, IOPS, backups, transfer, Multi-AZ) add up fast, and asks what managed alternatives others switched to.
+    notes: |
+      Borderline pricing_complaint vs switching_intent: they are 'starting to question' rather than committed to leaving. REVIEW: company string -- the model may say 'AWS' or 'Amazon'; exact-match grading fails those.
+
+  - id: rd-003
+    source_url: https://www.reddit.com/r/mysql/comments/1vegulm/  # posted 2026-08-03
+    evidence:
+      title: "MySQL Workbench crashing on MacOS"
+      content: |
+        Hi everyone! I'm fairly new to SQL and finished a foundation course on Maven Analytics.
+
+        I wanted to do a practice project today and opened MySQL Workbench, but it kept crashing on me. I also reinstalled the Workbench with the latest version: [https://dev.mysql.com/downloads/workbench/](https://dev.mysql.com/downloads/workbench/)
+
+        8.0.47 ARM version since my MacBook is on M2 chip, but the crashes still continue happening. A check on the crash report with ChatGPT showed me that the latest version of MySQL is incompatible with MacOS Tahoe 26.6 :'(
+
+        I've been learning on MySQL Workbench all these while, but I'm wondering:
+        \- Is anyone else facing this issue?
+        \- If yes, what's the alternate programme are you using currently? I don't mind purchasing a one-off programme if it's inexpensive, better if it's free of course.
+
+        Thank you in advanced!
+    expected:
+      skip: false
+      signal_type: reliability_issue
+      entity:
+        company: "Oracle"
+      effective_date: null
+    reference_summary: |
+      MySQL Workbench 8.0.47 (ARM) keeps crashing on an M2 Mac running macOS Tahoe 26.6 even after reinstalling; user asks for alternatives.
+    notes: |
+      Clear crash report. There is a secondary switching question, but the core signal is reliability.
+
+  - id: rd-004
+    source_url: https://www.reddit.com/r/SQL/comments/1u97vxk/  # posted 2026-06-18
+    evidence:
+      title: "DBeaver for a beginner like me - getting rid of Workbench"
+      content: |
+        hi all!
+
+        As a beginner in working with relational DBMS, i started with mysql.
+
+        However, after reading some more, i came to find out that Workbench - the go-to tool for mysql editing for many people - is no longer properly actively maintained (updated) for quite some time now...
+
+        Also, Workbench isnt available for Linux Mint (my fav distro).
+
+        To shoot two birds with one stone, i decided to look for an alternative - and lo and behold, i found DBeaver.
+
+        As i am sure you guys already know, Workbench comes in 2 "flavours" - a minimal 200 MB installation (gui client only) and a 500+ mb installation (server/ connector client with gui etc).
+
+        The problem faced by a beginner like me - on a fresh pc (win11), installing DBeaver and attempting to connect to a mysql database WITHOUT having any trace of Workbench installed...is impossible (it returns connection errors....of course, there is nothing to connect to...)!
+
+        After lots of trial and failure in setting up a msql driver to connect to a DB, reading, and youtube-ing, i came to find out that DBeaver lacks a critical component - the db engine, a server.
+
+        This is confirmed, seeing how all tutorials - even those this year - have a complete Oracle Mysql Workbench installation prior to installing and running DBeaver.
+
+        DIRECT QUESTION - is there a way to set up (on localhost...) a db engine so i can create a new mysql connection and use mysql dabatases ***WITHOUT*** anything related to Workbench from Oracle installed on my pc ...? or are we stuck with Workbench forever ?
+
+        i give up, after tones of trying ...
+
+        IF there is, please tell me directly...thanks a lot!
+    expected:
+      skip: false
+      signal_type: usability_issue
+      entity:
+        product: "DBeaver"
+      effective_date: null
+    reference_summary: |
+      Beginner can't get DBeaver to connect to MySQL without Workbench installed, not realizing a MySQL server must be installed separately; also notes Workbench is poorly maintained and unavailable on Linux Mint.
+    notes: |
+      Hard example. The pain is onboarding confusion (client vs server), read here as usability_issue for DBeaver; switching_intent away from Workbench is a defensible alternative. REVIEW.
+
+  - id: rd-005
+    source_url: https://www.reddit.com/r/postgres/comments/1uvg6kc/  # posted 2026-07-13
+    evidence:
+      title: "If pgAdmin disappeared tomorrow, what would you switch to?"
+      content: |
+        Honestly, pgAdmin feels like that old tool everyone uses just because it’s there, even though the random lag and weird web-UI quirks are a constant headache. If it suddenly went under, what’s your immediate alternative? Personally, DBeaver feels too bloated for a quick query, and paying for DataGrip or TablePlus isn't always ideal depending on the project budget. Are people actually finding good, lightweight open-source alternatives, or are you just sticking to psql in the terminal and calling it a day?
+    expected:
+      skip: false
+      signal_type: usability_issue
+      entity:
+        product: "pgAdmin"
+      effective_date: null
+    reference_summary: |
+      User calls pgAdmin's random lag and web-UI quirks a constant headache and asks what lightweight open-source client others would switch to; finds DBeaver bloated and paid tools like DataGrip/TablePlus hard to justify.
+    notes: |
+      Usability complaint framed as a hypothetical switch. pgAdmin has no vendor company, so only product is graded -- 'pgAdmin 4' from the model would fail exact match.
+
+  - id: rd-006
+    source_url: https://www.reddit.com/r/oracle/comments/1ueexvl/  # posted 2026-06-24
+    evidence:
+      title: "Crazy Bug in CostBasedOptimizer in 23.26.0.0"
+      content: |
+        So, color me surprised when I got a question from one of our developers why a pretty simple query didn't return the expected results.
+
+        Basically, the query was:
+
+        >`SELECT * FROM table WHERE table.field IS NULL or table.field <= 'someValue';`
+
+        And it returned only rows with values, ignoring the rows with NULL.
+
+        After testing, I found another weird behaviour: The table had a couple of NUMERIC columns. When I included one of those, the bug appeared. When I only selected other columns, it worked, and returned all expected rows.
+
+        After much googling, I found another way to make it work:
+
+        >`SELECT /*+ RULE */ * FROM table WHERE table.field IS NULL or table.field <= 'someValue';`
+
+        Forcing the Rule Based Optimizer makes it work as well.
+
+        So, we now have a ticket with Oracle, let's see what happens. But a bug of this severity is pretty crazy to me.
+
+        Version is [23.26.0.0](http://23.26.0.0), btw. And yes, it's only on our staging systems, but still. Not even a 0.0 version should have these kind of bugs.
+
+        So, if you're running (or testing) that version, and you get unexpected results, maybe it's that.
+    expected:
+      skip: false
+      signal_type: reliability_issue
+      entity:
+        company: "Oracle"
+      effective_date: null
+    reference_summary: |
+      Oracle 23.26.0.0's cost-based optimizer returns wrong results for a simple 'IS NULL OR <=' query (NULL rows dropped when numeric columns are selected); the RULE hint works around it and an SR is open.
+    notes: |
+      Wrong-results optimizer bug -- canonical reliability_issue.
+
+  - id: rd-007
+    source_url: https://www.reddit.com/r/oracle/comments/1u6fuiq/  # posted 2026-06-15
+    evidence:
+      title: "Has MOS improved? Nope."
+      content: |
+        It's been several months since the "updated" Oracle Support site launched. At the time there were a lot of complaints about nearly every single aspect of MOS / Metalink. The last update (Doc ID NEWS21) was almost 2 months ago, and things haven't really improved. Yeah, some formatting changes, fixed links, and some other things that really should have been done before the roll out.
+
+        My biggest issues right now...
+
+        1. Finding the correct patch. Need to update something like OPatch? Sure, just go to the 6880880 patch and grab it. Only, you need to find the correct one on the left side menu which scrolls for days.
+        2. Search in MOS has always been a challenge. They have taken it to a whole new level. Currently trying to find out if a certain patch is needed for my new EM24ai environment. Search the patch number (or even CVE) in knowledge? It's like I'm being guided by a used car salesman trying to show me something I didn't ask for.
+        3. Need to re-authenticate. For the love of god, I'm navigating around in the system. I am active and trying to find a useful article. Why is my session about to expire in 10 minutes?
+        4. Lack of "Recently viewed articles." I cannot express just how useful this feature was to me in the old system. I probably used this more than favorite articles (which they only provided a half assed fix for BTW). With the response to favorites, I don't expect I'll see recents come back.
+        5. The AI is absolute garbage - I've had it ask me for the patch document to answer question. Excused me, what? You should have access to that info already. It has yet to provide anything meaningful, and just adds another level of frustration to the whole experiance. I'd rather use Copilot than Oracle MOS AI.
+
+        What about you? What areas frustrate you on the support portal? Is there anything positive?
+
+        On a side note, I laugh every time I see a 1 star for a document. Even if the document is spot on and accurate - I know it's gotta be people as frustrated as the rest of us with the system.
+    expected:
+      skip: false
+      signal_type: usability_issue
+      entity:
+        company: "Oracle"
+      effective_date: null
+    reference_summary: |
+      Months after the redesigned My Oracle Support site launched, the user says it still hasn't improved: hard-to-find patches, poor search, frequent re-authentication, no recently-viewed list, and an unhelpful AI assistant.
+    notes: |
+      Usability of the support portal, not the database itself.
+
+  - id: rd-008
+    source_url: https://www.reddit.com/r/mariadb/comments/1v8egj4/  # posted 2026-07-27
+    evidence:
+      title: "Adobe Commerce is making MariaDB its default database platform"
+      content: |
+        Adobe Commerce has now made its future database direction explicit: MariaDB is the default and recommended platform going forward.
+
+        Adobe Commerce 2.4.8 and 2.4.9 are expected to be the final releases supporting MySQL, while newer MariaDB versions are already appearing in Adobe’s system requirements.
+
+        For the MariaDB community, this is a significant adoption milestone. Adobe Commerce and Magento power a large number of demanding production environments, with substantial ecosystems of extensions, hosting providers, agencies and developers around them.
+
+        It also raises some practical questions for the community:
+
+        * What migration guidance will Adobe Commerce users need?
+        * Which compatibility differences are likely to cause the most trouble?
+        * Are extension developers already testing primarily against MariaDB?
+        * What tooling, documentation or benchmarks would make the transition easier?
+
+        Frédéric Descamps has written a detailed overview here:
+
+        [https://mariadb.org/adobe-commerce-chooses-mariadb-as-its-default-database-platform/](https://mariadb.org/adobe-commerce-chooses-mariadb-as-its-default-database-platform/)
+
+        Interested to hear from anyone running Magento or Adobe Commerce on MariaDB today. What has your experience been?
+    expected:
+      skip: false
+      signal_type: positive_adoption_pattern
+      entity:
+        company: "MariaDB"
+      effective_date: null
+    reference_summary: |
+      Adobe Commerce is making MariaDB its default database, with 2.4.8/2.4.9 expected to be the last releases supporting MySQL.
+    notes: |
+      Adoption milestone for MariaDB; competitor_mention_rising (vs MySQL) is a possible alternative. effective_date null: only release numbers are given, no date.
+
+  - id: rd-009
+    source_url: https://www.reddit.com/r/PostgreSQL/comments/1v57qb3/  # posted 2026-07-24
+    evidence:
+      title: "PostgreSQL Debugger"
+      content: |
+        I've been having trouble with the debugger in postgres and it's starting to get annoying.
+
+        When I try to use the "Set Breakpoint" option, it does normally catch the session and the debugger works fine. But there are some instances where I start the debugger, trigger a procedure call on another device, the debugger doesn't catch it and it creates a session that cannot be terminated unless the server is restarted.
+
+        This "zombie" session becomes a problem because it blocks other sessions from progressing. Said sessions that gets stuck also call the same procedure. This causes the devices freeze when they make the action that triggers the procedure call until it times out. It is clear from the session list that the "zombie" session is blocking it because of the Blocking PID value.
+
+        I suspected a non-terminating loop but all loops inside should terminate as they are FOR loops. It seems to originate from an update statement but I don't see a way that could be.
+
+        Has anybody else encountered this issue and how can I prevent it in the future? Thank you in advance.
+
+        PostgreSQL version is 14
+
+        pgAdmin 4 version is 9.16
+
+        pldbgapi version is 1.1
+
+        plpgsql version is 1.0
+    expected:
+      skip: false
+      signal_type: reliability_issue
+      entity:
+        product: "pgAdmin"
+      effective_date: null
+    reference_summary: |
+      The pgAdmin 4 (9.16) PL/pgSQL debugger sometimes fails to catch a procedure call and leaves a zombie session that blocks other sessions until the PostgreSQL 14 server is restarted.
+    notes: |
+      Reliability of the debugger (pgAdmin + pldbgapi). REVIEW entity: product 'pgAdmin' vs 'pgAdmin 4' exact-match brittleness.
+
+  - id: rd-010
+    source_url: https://www.reddit.com/r/PostgreSQL/comments/1u6aa0l/  # posted 2026-06-15
+    evidence:
+      title: "Moving from Mysql to Postgresql. Where do We start?"
+      content: |
+        Long Story Short: We're looking to move our production database (around 1.2G in size, seperated into 3 seperate database schema) from Mariadb (mariadb galera cluster) to another Relational database. We're looking at postgresql for now.
+
+        We're all quite familiar with mysql we've been using it for total combined experience of around 20+ years all between us. so I think it's safe to say that we're quite familiar with sql, mysql and their quirks.
+
+        We're planning to learn postgresql first and run it in staging and test environment before pulling the trigger. Anyone have good advice on where to start?
+
+        We're worried about index corruption like what happened to github, and any other administration and usage we need to learn about.
+    expected:
+      skip: false
+      signal_type: customer_migration_intent
+      entity:
+        company: "MariaDB"
+      effective_date: null
+    reference_summary: |
+      Team with 20+ years of MySQL experience plans to move a 1.2 GB production MariaDB Galera database to PostgreSQL and asks where to start, worried about index corruption.
+    notes: |
+      Planned migration away from MariaDB. REVIEW: entity could arguably be PostgreSQL (the destination).
+
+  - id: rd-011
+    source_url: https://www.reddit.com/r/PostgreSQL/comments/1u2fpj9/  # posted 2026-06-10
+    evidence:
+      title: "Help"
+      content: |
+        Supabase isn't supporting IPv4 (without $4/month), neon is great but doesn't have db bucket in my country, and I have no idea about AWS RDS Postgres and frar they may cost me insanely...
+
+        What to do ?
+        Data residency is important
+    expected:
+      skip: false
+      signal_type: pricing_complaint
+      entity:
+        company: "Supabase"
+      effective_date: null
+    reference_summary: |
+      User can't find suitable managed Postgres: Supabase charges $4/month for IPv4, Neon has no region in their country, and they fear AWS RDS costs; data residency matters.
+    notes: |
+      Short, multi-vendor. Supabase is the only one with an explicit price complaint. REVIEW: entity may reasonably be null.
+
+  - id: rd-012
+    source_url: https://www.reddit.com/r/Database/comments/1vuh321/  # posted 2026-08-21
+    evidence:
+      title: "Seeking Support: Airtable power user migrating company backend from Airtable to other tool"
+      content: |
+        As a proud power-user of Airtable, I was disheartened by the acquisition of Airtable by Bending Spoons. They will likely "[enshittify](https://www.amazon.com/Enshittification-Everything-Suddenly-Worse-About/dp/0374619328)" the platform over the next 6-12 months, stagnating development and jacking up prices. In anticipation of this, I am **seeking alternatives to Airtable** so I can begin the migration process now before my company's renewal period begins.
+
+        Airtable was a provider that was perfectly fit for purpose for our company. We don't have enough employees to develop our own backend nor do we have the capacity. The **leading alternative is Zite.** I have a decent amount of experience using Zite as a frontend and form provider for my Airtable databases, but very little experience using its native databases.
+
+        Does anyone here have experience migrating from Airtable to Zite? I am looking for **advice, warnings, best practices, and general support.**
+
+        Does anyone have recommendations for other alternatives?
+    expected:
+      skip: false
+      signal_type: customer_migration_intent
+      entity:
+        company: "Airtable"
+      effective_date: null
+    reference_summary: |
+      Airtable power user, expecting price hikes and stagnation after the Bending Spoons acquisition, is starting to migrate their company backend (likely to Zite) before renewal.
+    notes: |
+      Pre-emptive migration triggered by an acquisition. switching_intent also defensible.
+
+  - id: rd-013
+    source_url: https://www.reddit.com/r/SQL/comments/1v1ot5g/  # posted 2026-07-20
+    evidence:
+      title: "SSMS - Execute query on 300 servers"
+      content: |
+        I'm starting to use SSMS at work, that's the only tool I have (no PowerShell cmdlet).
+
+        I need to execute an identical SQL Query on 300 servers, but I can't find a way to do that. Could anyone point me in the right direction please ?
+
+        So far, I did add the 300 servers to the registered servers by tinkering to not do it manually, but when I execute the query, I only get 50 ish servers connected, then SSMS hangs and crash.
+    expected:
+      skip: false
+      signal_type: reliability_issue
+      entity:
+        company: "Microsoft"
+      effective_date: null
+    reference_summary: |
+      Running one query across ~300 registered servers in SSMS connects only ~50 before SSMS hangs and crashes.
+    notes: |
+      Crash under a multi-server query. new_feature_demand is a plausible alternative reading.
+
+  - id: rd-014
+    source_url: https://www.reddit.com/r/PostgreSQL/comments/1tvx3pw/  # posted 2026-06-03
+    evidence:
+      title: "I migrated our workload from Aurora to LakeBase"
+      content: |
+        quick background: i recently led a migration from amazon aurora (mysql-compatible) to databricks lakebase in a production environment. wanted to share the honest version of how it went.
+
+        one thing worth clarifying upfront since there's some confusion out there — lakebase is not a columnar analytics engine. it's actually a fully managed postgresql oltp database that integrates with the lakehouse. databricks built it on top of their neon acquisition, and the whole point is bridging operational workloads with your lakehouse data, not replacing a data warehouse. so if you're expecting parquet files and vectorized scans, wrong product, that's databricks sql.
+
+        the reason we moved was mostly about unifying our operational data with the rest of the databricks platform without maintaining a separate postgres instance outside of it. the lakehouse integration is real. you can sync data to delta tables without custom etl glue, which was genuinely painful before. the branching feature is also surprisingly useful, basically copy-on-write database clones that made testing way less scary. (+ some hire ups decision there :P)
+
+        what actually we could bet better is the developer velocity went up because engineers stopped copying data between systems. point-in-time recovery is solid. and spinning up a new database instance is almost instant, which changed how we think about environment provisioning.
+
+        the caveats though — it's still a young product. it launched in mid-2025 so operational maturity is not at aurora/rds levels yet. we had to build more of our own automation for things that are just handled for you on rds. bi tool compatibility is also hit or miss depending on what your team uses.
+        still blocking us: a couple internal services expect sub-10ms point update latency under heavy concurrency, and we're still tuning for that. observability is also thinner than what we had on aurora — we're piecing together metrics coverage manually.
+
+        kept aurora running in parallel during the migration and compared results domain by domain before cutting over, which i'd strongly recommend. doing it all at once would've been a mess.
+
+        curious if anyone else has hit the observability gaps and found a good solution, or if there are connector workarounds for tools that don't fully support lakebase yet.
+    expected:
+      skip: false
+      signal_type: customer_migration_intent
+      entity:
+        company: "Databricks"
+      effective_date: null
+    reference_summary: |
+      Team migrated a production workload from Amazon Aurora (MySQL) to Databricks Lakebase for lakehouse integration and branching; velocity improved, but the product is still immature and some latency needs are unmet.
+    notes: |
+      Completed migration report with a mixed verdict. positive_adoption_pattern is also defensible. REVIEW.
+
+  - id: rd-015
+    source_url: https://www.reddit.com/r/mariadb/comments/1v0mzbd/  # posted 2026-07-19
+    evidence:
+      title: "MariaDB 10.6 Crossed the EOL Line on July 6th"
+      content: |
+        Two weeks ago, on July 6, 2026, [MariaDB Community Server 10.6 reached end of life](https://mariadb.org/mariadb-server-10-6-reaches-end-of-life-on-july-6th/). The MariaDB Foundation announced this back in June and gave people several months to plan. Some planned. Many did not. If you are in the second group, here is what you need to know.
+
+        # What “End of Life” Actually Means for a Database
+
+        End of life does not make your database stop working. Queries keep returning rows, your application keeps humming along, and nothing explodes on day one. What stops is the flow of security patches, bug fixes, and corrective releases from the MariaDB Foundation. The 10.6 branch is now frozen.
+
+        More info: [https://blog.kalfaoglu.net/posts/2026-07-19-mariadb-106-end-of-life-en/](https://blog.kalfaoglu.net/posts/2026-07-19-mariadb-106-end-of-life-en/)
+    expected:
+      skip: false
+      signal_type: customer_migration_intent
+      entity:
+        company: "MariaDB"
+      effective_date: 2026-07-06
+    reference_summary: |
+      MariaDB Community Server 10.6 reached end of life on July 6, 2026; no further security patches or bug fixes, so users need to upgrade.
+    notes: |
+      Exercises effective_date with a real EOL date. Signal type follows the seed convention for EOL posts (db-005). REVIEW whether churn_related_issue fits better.
+
+  - id: rd-016
+    source_url: https://www.reddit.com/r/PostgreSQL/comments/1vv5bsl/  # posted 2026-08-22
+    evidence:
+      title: "What are you using for Postgres after outgrowing the free tier but not needing AWS?"
+      content: |
+        My app has been running on a free Postgres tier and it's starting to hit the limits now that real users are on it. Connection limits are getting tight and I don't want to deal with random pauses or throttling anymore.
+
+        Most recommendations jump straight to AWS RDS, and that feels like overkill for where I'm at right now. I'd also rather not manage Postgres on a VPS myself if there's a reasonably priced managed option out there.
+
+        Looking for something paid with predictable pricing, backups handled, and a setup that doesn't take a whole afternoon. What's working for you on a small production app?
+    expected:
+      skip: false
+      signal_type: switching_intent
+      entity: null
+      effective_date: null
+    reference_summary: |
+      App has outgrown its free Postgres tier (tight connection limits, pauses/throttling); user wants a paid managed option with predictable pricing that isn't AWS RDS.
+    notes: |
+      Entity null: the current provider is not named; AWS RDS is mentioned only as something to avoid.
+
+  - id: rd-017
+    source_url: https://www.reddit.com/r/mysql/comments/1v2v9k3/  # posted 2026-07-21
+    evidence:
+      title: "Leaving MySQL after 25 years of reliable stability"
+      content: |
+        I figured I'd write a reality-based "kudos" on MySQL.
+
+        I run a small software company.  In 2001, I made a website content manager that ran on MySQL 4. It is somewhat similar to what WordPress would become, though it predated WordPress by a couple of years.
+
+        I am writing this in July of 2026. MySQL 4 has been rock solid, running my website, and other websites, for 25 years. I did not tinker with it. It kept working.
+
+        Yet, my paid software development work was not in MySQL. In that same 2001 time frame when I chose MySQL, I was approached by a client who wanted me to implement a Microsoft SQL Server database engine for their custom business software, which had until then had been using Microsoft Access as its database engine.
+
+        They liked what I did, and wanted more. They remained my client for about 20 years, until COVID-19 hit them very hard: their main business involved in-person trade shows.
+
+        Over time, I became highly skilled in working with the Microsoft SQL Server database engine, including migrating Visual BASIC for Applications (a.k.a. VBA) custom program code from Microsoft Access into the database language of Microsoft SQL Server: Transact-SQL (a.k.a. T-SQL).
+
+        There were some compelling reasons to also migrate my website content manager from the MySQL 4 database engine to the Microsoft SQL Server database engine, since the latter was what I was most comfortable working with.
+
+        It’s like one of my automotive clients who standardized on using Ford vans and trucks, yet they also have one old International truck that just refuses to die, so they keep using it, and it keeps working.
+
+        I figured that leaving MySQL was not urgent, since I do know MySQL 4 well enough to be able to fix any problems if they were to arise. Yet, none did.
+
+        The recent 25 years of my life have been tumultuous.  The recent 25 years have been tumultuous for America too. So my attention often went to whatever was the newest crisis, not always to what made calm, strategic sense.
+
+        Also, as the saying goes: "If it ain't broke, don't fix it." So, I just stayed on MySQL for my content manager. For 25 years, the software based on MySQL 4 kept running flawlessly. But more impressively: MySQL 4 kept running flawlessly.
+
+        My website content manager is a fairly sophisticated piece of software that includes various logs, A/B testing and so on. The logs grew and grew … for 25 years.
+
+        Finally, the logs in MySQL grew to be large enough to run the virtual machine out of disk space. Yes, I could have cleared the logs, but that doesn’t shrink the MySQL 4 database. Some additional work would be needed to make the database smaller again.  And that, I didn’t really want to do. Yes, I could have increased the disk space.  But …
+
+        I had lived the great American tradition, of kicking the can down the road, for 25 years.
+
+        I decided that if I was ever going to migrate away from MySQL, this was the best time.  So I did.  And now my website content manager runs on Microsoft SQL Server, where it is indeed easier for me (emphasis on "for me") to work with it, such as if I want to implement significant changes to the software, such as table structure changes.
+
+        I'm not saying Microsoft SQL Server is better than MySQL. But I'm reminded of the time when a colleague mused: "Sometimes, the best tool for the job is the tool you know best."  There some merit to his argument (and, I concede, much merit to the contrary too).
+
+        After 25 years, I finally decommissioned the virtual machine on which MySQL 4 had been running.
+
+        That is a very long time for a database engine. So, a massive "kudos" to MySQL 4 and the people who made it.
+
+        For me, the migration was fairly intricate. I'd hoped it would be as simple as "download and run this conversion utility" but somehow that approach turned out to be non-viable for me. At some point, I stopped looking for easy solutions and I made my own process, and I powered through. No doubt: smarter people would have done it better.
+
+        Even so, if you might benefit from knowing the specific steps I took, feel free to ask.
+    expected:
+      skip: false
+      signal_type: customer_migration_intent
+      entity:
+        company: "Oracle"
+      effective_date: null
+    reference_summary: |
+      After 25 years of trouble-free MySQL 4, the author migrated their website content manager to Microsoft SQL Server (their main skill set) and decommissioned the MySQL VM.
+    notes: |
+      Completed migration away from MySQL, written as praise -- the positive tone must not flip it to positive_adoption_pattern. REVIEW entity: 'Oracle' vs 'MySQL'; the model may put MySQL as the company.
+
+  - id: rd-018
+    source_url: https://www.reddit.com/r/SQL/comments/1umi5wh/  # posted 2026-07-03
+    evidence:
+      title: "BizNet Sunset - Migration Plan"
+      content: |
+        BizNet/BizInsight is sunsetting - webinar on July 16th - [https://events.teams.microsoft.com/event/cf5a9be0-3dd1-4d6a-bf85-44503dbe0fda@2f3aa76a-89a8-4468-9894-2b4842b9534b](https://events.teams.microsoft.com/event/cf5a9be0-3dd1-4d6a-bf85-44503dbe0fda@2f3aa76a-89a8-4468-9894-2b4842b9534b)
+
+        Is anyone a user right now?
+    expected:
+      skip: false
+      signal_type: customer_migration_intent
+      entity:
+        company: "BizNet"
+      effective_date: null
+    reference_summary: |
+      BizNet/BizInsight is being sunset, with a migration webinar on July 16; user asks whether anyone else still uses it.
+    notes: |
+      effective_date must stay null: July 16 is a webinar date, not the sunset date.
+
+  - id: rd-019
+    source_url: https://www.reddit.com/r/SQL/comments/1twqf01/  # posted 2026-06-04
+    evidence:
+      title: "SQLLocalDB 16.0 error -"
+      content: |
+        I'm getting this error in event viewer - Attributed to Microsoft SQL Server 2022 Local DB. I am a novice when it comes to troubleshooting SQL issues, this is on a virtual machine at the manufacturing plant I work at. I've tried stopping, deleting, creating, and starting using CMD, tried repairing the installation of MSSQL Server 2022 to no avail. Any help would be greatly appreciated
+    expected:
+      skip: false
+      signal_type: reliability_issue
+      entity:
+        company: "Microsoft"
+      effective_date: null
+    reference_summary: |
+      SQL Server 2022 LocalDB (16.0) keeps failing on a plant VM despite stopping, deleting, recreating and repairing the installation.
+    notes: |
+      Content trimmed to the question paragraph -- the original error log contains an employer domain and a username.
+
+  - id: rd-020
+    source_url: https://www.reddit.com/r/SQL/comments/1tzhtiq/  # posted 2026-06-07
+    evidence:
+      title: "Lakebase/Neon experiences from users"
+      content: |
+        Lakebase was recently merged into Databricks platform after Neon’s acquisition. I have been using it lately and I like the scalability and branching features.
+
+        I wanted to know experiences of other folks using it.
+    expected:
+      skip: false
+      signal_type: positive_adoption_pattern
+      entity:
+        company: "Databricks"
+      effective_date: null
+    reference_summary: |
+      User has been using Lakebase (Neon, now part of Databricks) and likes its scalability and branching; asks for others' experiences.
+    notes: |
+      Short positive usage report.
+
+  - id: rd-021
+    source_url: https://www.reddit.com/r/Database/comments/1v3v04s/  # posted 2026-07-22
+    evidence:
+      title: "Consumer-friendly (i.e. free or cheap perpetual license) DB client with a good GUI + ability to create dynamic pivot tables?"
+      content: |
+        Hey so I have a video game modding project that that features an excel spreadsheet that I have to continually change and update each time I create a new version of the mod.
+
+        Over time, this spreadsheet has ballooned in size, which dozens of columns now. Current state of the spreadsheet:
+
+        * A column for a "key" value
+        * A few columns for metadata
+        * Several groups, which have the same 4 columns inside them.
+
+        When I only had two groups, everything was easy. But now I have 8, and could conceivably add more. At like 40 columns, this is simply too big for an excel spreadsheet.
+
+        I realize I could split apart the rows... but then it makes the spreadsheet really annoying to traverse vertically, and there is still some value in being able to sort/filter with it all in 1 row.
+
+        What I would like to do is this: Have 1 "main table" that looks the same. And each time I select a row, a pivot table is created, whic looks like this:
+
+        I need both the pivot table and the main table to be editable. I feel like at this point what I'm asking for is basically a simple database... and when it comes to that, creating a back end seems easy enough, but it is the front end that is the problem.
+
+        Options I've investigated:
+
+        * Microsoft Access - terrible GUI
+        * NoCo DB - I don't like that it is browser / web-based.
+
+        I'm not sure what else to look at, because I'm just a dude working on a community modding project. It doesn't make sense to pump a ton of money into this, and I am allergic to the idea of a subscription license. I don't mind paying a modest fee for a perpeutal license of nice software though.
+
+        Do you guys have any recommendations?
+    expected:
+      skip: false
+      signal_type: new_use_case
+      entity: null
+      effective_date: null
+    reference_summary: |
+      Game modder outgrowing an Excel sheet wants a cheap perpetual-license desktop DB client with an editable master table plus a per-row pivot view; rejected Access (bad GUI) and NocoDB (web-based).
+    notes: |
+      Non-developer use case for DB GUIs. Entity null: several products named, none is the subject.
+
+  - id: rd-022
+    source_url: https://www.reddit.com/r/PostgreSQL/comments/1vau5yt/  # posted 2026-07-30
+    evidence:
+      title: "There is no cheap global Postgres, what are the alternatives?"
+      content: |
+        Currently I use pg hosted on Hetzner in Germany. My users are in different global regions and pay latency cost. I run a Shopify app that complains that my LCP is above recommended threshold of 2.5s. I have optimized my queries and calls and was able to optimize it a bit.
+
+        My question is, there is no cheap way to have pg global replicas. My app is new and doesn't have enough revenue to justify the cost. I have done some research and the only option I see is migrating to SQLite which can be easily and cheaply replicated. But, with that, I lose pg features like JSONB, ::datetime and the likes. Also, SQLite doesn't support most ALTER commands.
+
+        Has anyone solved this?
+    expected:
+      skip: false
+      signal_type: pricing_complaint
+      entity: null
+      effective_date: null
+    reference_summary: |
+      Shopify app developer on Hetzner-hosted Postgres says global read replicas are unaffordable for a young app and is considering SQLite despite losing Postgres features.
+    notes: |
+      Hard: could be switching_intent (to SQLite) or new_use_case. REVIEW.
+
+  - id: rd-023
+    source_url: https://www.reddit.com/r/oracle/comments/1uk1wa6/  # posted 2026-06-30
+    evidence:
+      title: "Reading Interpretation"
+      content: |
+        Hello, I was hoping to get some help interpreting a reading I did. I will attach the format I used, the cards, and their meaning from the book from the set. I feel pretty stuck in life right now and I’ve been trying my best to make changes for making new friends, I got out of a relationship a few months ago and have been struggling with that, and I’ve hated my occupation place for years now, but I haven’t been able to get a different occupation place elsewhere. It keeps taking about change and I’ve been trying! but nothing has gone anywhere. What do you think it all means? (two cards came out for the first prompt, that’s why there’s 2 there)
+    expected:
+      skip: true
+    notes: |
+      Off-topic: tarot reading posted to r/oracle.
+
+  - id: rd-024
+    source_url: https://www.reddit.com/r/oracle/comments/1uq5c3n/  # posted 2026-07-07
+    evidence:
+      title: "Oracle is offering 11 FREE certifications right now — including OCI, AI, Agentic AI, ERP, HCM, SCM, and more"
+      content: |
+        Here’s a cleaner, more engaging LinkedIn-style version you can post:
+
+        Oracle is currently offering **11 Professional Certifications for free** a solid chance to build skills in **Oracle Cloud, AI, databases, and business applications** without paying exam fees.
+
+        Free Oracle Certifications Available Right Now
+
+        [https://education.oracle.com/agentic-ai-foundations-associate/pexam\_1Z0-1157-26](https://education.oracle.com/agentic-ai-foundations-associate/pexam_1Z0-1157-26)
+
+        [https://education.oracle.com/oracle-cloud-infrastructure-ai-foundations-associate/pexam\_1Z0-1122-26](https://education.oracle.com/oracle-cloud-infrastructure-ai-foundations-associate/pexam_1Z0-1122-26)
+
+        [https://education.oracle.com/oracle-fusion-cloud-applications-scm-foundations-certified-associate/pexam\_1Z0-1163-1](https://education.oracle.com/oracle-fusion-cloud-applications-scm-foundations-certified-associate/pexam_1Z0-1163-1)
+
+        [https://education.oracle.com/oracle-data-platform-2026-foundations-associate/pexam\_1Z0-1195-26](https://education.oracle.com/oracle-data-platform-2026-foundations-associate/pexam_1Z0-1195-26)
+
+        [https://education.oracle.com/oracle-guided-learning-administrator-foundations-associate-rel-1/pexam\_1Z0-1150-1](https://education.oracle.com/oracle-guided-learning-administrator-foundations-associate-rel-1/pexam_1Z0-1150-1)
+
+        [https://education.oracle.com/oracle-cloud-applications-epm-process-essentials-rel1/pexam\_1Z0-1164-1](https://education.oracle.com/oracle-cloud-applications-epm-process-essentials-rel1/pexam_1Z0-1164-1)
+
+        [https://education.oracle.com/oracle-fusion-cloud-applications-scm-foundations-certified-associate/pexam\_1Z0-1163-1](https://education.oracle.com/oracle-fusion-cloud-applications-scm-foundations-certified-associate/pexam_1Z0-1163-1)
+
+        [https://education.oracle.com/oracle-fusion-cloud-applications-hcm-foundations-associate-rel1/pexam\_1Z0-1162-1](https://education.oracle.com/oracle-fusion-cloud-applications-hcm-foundations-associate-rel1/pexam_1Z0-1162-1)
+
+        [https://education.oracle.com/oracle-fusion-cloud-applications-cx-foundations-associate-rel1/pexam\_1Z0-1161-1](https://education.oracle.com/oracle-fusion-cloud-applications-cx-foundations-associate-rel1/pexam_1Z0-1161-1)
+
+        [https://education.oracle.com/oracle-fusion-cloud-applications-erp-foundations-associate-rel1/pexam\_1Z0-1160-1](https://education.oracle.com/oracle-fusion-cloud-applications-erp-foundations-associate-rel1/pexam_1Z0-1160-1)
+
+        [https://education.oracle.com/oracle-fusion-ai-agent-studio-foundations-associate-rel1-beta/pexam\_1Z0-1145-1](https://education.oracle.com/oracle-fusion-ai-agent-studio-foundations-associate-rel1-beta/pexam_1Z0-1145-1)
+
+        Suggested Learning Path
+
+        If you’re planning to make the most of this, I’d suggest following this order:
+
+        **1)** Start with **OCI Foundations** to understand Oracle Cloud basics
+        **2)** Move to **OCI AI Foundations** to build your AI fundamentals on Oracle Cloud
+        **3)** Then take **Agentic AI Foundations** to explore Oracle’s AI agent concepts
+        **4)** After that, pick a specialization based on your role or interest:
+
+        * **ERP**
+        * **HCM**
+        * **SCM**
+        * **CX**
+        * **EPM**
+        * **AI Agent Studio**
+
+        This is a useful opportunity for anyone looking to strengthen their profile in **cloud, AI, Oracle applications, or enterprise solutions**.
+
+        If you’re already exploring Oracle certifications, which one would you start with first?
+    expected:
+      skip: true
+    notes: |
+      Copy-pasted AI/LinkedIn filler ('Here's a cleaner, more engaging LinkedIn-style version you can post') listing free certification links.
+
+  - id: rd-025
+    source_url: https://www.reddit.com/r/postgres/comments/1u2xuw5/  # posted 2026-06-11
+    evidence:
+      title: "Best Multi-Database IDEs (MySQL, PostgreSQL, Oracle, SQL Server) for 2026"
+      content: |
+        Are your developers still switching between tools just to handle different databases? You’re burning time, not just money. In 2026, the gap between high-performing dev teams and the rest isn't just talent—it's the tools they’re given. And here's the kicker: only a handful of leaders understand how much efficiency is lost by juggling fragmented environments.  Let’s fix that.
+
+        Whether you're overseeing a .NET department, driving innovation as a CTO, or managing risk in a regulated environment, this guide will help you choose a multi-database IDE that aligns with your business goals, security standards, and delivery timelines.
+
+        Below are the top IDEs for teams working across MySQL, MariaDB, PostgreSQL, Oracle, and SQL Server—each with real-world upsides (and the risks you should know).
+
+        **1. dbForge Edge — The Strategic Powerhouse**
+
+        Best for: Managers who need a unified tool that empowers multiple roles—from developers to analysts—while keeping IT governance tight.
+
+        Why it’s different: dbForge Edge isn’t just a database IDE—it’s a multi-engine productivity suite. One license, four RDBMSs: MySQL/MariaDB, PostgreSQL, Oracle, SQL Server, and a wide range of cloud services. Designed with GUI-first workflows, it enables rapid query development, schema design, performance tuning, and even real-time data visualization without switching tools or retraining staff.
+
+        Strengths:
+
+        * Intuitive, unified GUI for database development
+        * Smart code completion and refactoring
+        * Advanced query profiling and performance tuning
+        * Built-in reporting and visualization
+        * Secure role-based access & audit trails for compliance
+
+        Risks:
+
+        * Requires team onboarding
+        * Lack of advanced features for DBAs.
+
+        **2. DBeaver Ultimate — Open-Source Grown Up**
+
+        Best for: Tech-savvy teams in smaller orgs who want a low-cost, highly customizable IDE
+
+        Strengths:
+
+        * Open-source core with premium extensions
+        * Supports a wide range of databases
+        * Solid data editor and ER diagrams
+        * Good for individual contributors with mixed-stack tasks
+
+        Risks:
+
+        * Interface less intuitive for non-technical managers
+        * Support is community-driven (slow for urgent bugs)
+
+        Use Case: A small SaaS team led by a hands-on CTO using PostgreSQL and MySQL might find this a lean, no-frills solution.
+
+         **3. DataGrip by JetBrains — For Precision Control**
+
+        Best for: Senior engineers and managers who value precision, customization, and don’t mind complexity
+
+        Strengths:
+
+        * Highly advanced code intelligence
+        * Version control integration
+        * Customizable workflows and shortcuts
+        * Strong for developers who also write stored procedures
+
+        Risks:
+
+        * Steep learning curve for non-dev team members
+        * Lacks some advanced GUI-based tuning features
+
+        Consider it if: Your development team is experienced, and you’re focused on highly customized backend systems.
+
+         **4. Toad Edge — Lightweight SQL IDE for MySQL & PostgreSQL**
+
+        Best for: Dev teams focused on open-source engines in highly controlled environments
+
+        Strengths:
+
+        * Clean interface
+        * Schema comparison and data sync
+        * Strong change management controls
+        * Good for small teams working in regulatory environments
+
+        Risks:
+
+        * Limited to MySQL and PostgreSQL
+        * Less frequent updates
+
+        The real question isn’t “which IDE has the most features?” It’s “which one removes the most friction for your team without creating new chaos?” If your devs are still jumping between tools for every database, that’s not flexibility. That’s workflow debt wearing a fake mustache.
+    expected:
+      skip: true
+    notes: |
+      Vendor listicle marketing ('Best Multi-Database IDEs for 2026'), not user feedback.
+
+  - id: rd-026
+    source_url: https://www.reddit.com/r/SQL/comments/1tu0osy/  # posted 2026-06-01
+    evidence:
+      title: "Open-source ingestr v1: ingest data into your warehouse 12x faster"
+      content: |
+        Hi folks, Burak here from Bruin. We have released ingestr as an open-source CLI tool 2 years ago here: [https://github.com/bruin-data/ingestr](https://github.com/bruin-data/ingestr)
+
+        For those that might not now: ingestr is a CLI tool to ingest data. It supports 100+ sources, 20+ destinations, takes care of schema detection, schema evolution, different materialization strategies like SCD2 out of the box. You can use the same CLI to copy a Postgres database to a destination, or pull data from Hubspot.
+
+        Ingestr, being a Python CLI, has been doing quite well but over time it started to show its age:
+
+        * Performance: ingestr was not the fastest tool out there due to various reasons. We wanted to provide the fastest solution out there, but there were limitations out of our control.
+        * Packaging: sharing a Python CLI tool across hundreds of different types of devices the users run it on ended up being quite a painful experience.
+        * Reliability: ingestr relied on a stateful design due to a dependency, which brought all sorts of problems with it, especially around failed loads or corrupted state.
+        * Upgrades: with all the dependencies we had, upgrades started to become a real struggle.
+
+        Due to some of these issues, we have rebuilt ingestr v1 completely from scratch, in Go. We picked Go for a few reasons:
+
+        * Go is fast. LIke, much faster than vanilla Python.
+        * Go is a compiled language, meaning that we eliminate quite a lot of bugs ahead of time.
+        * Go is great with agents: agents write perfect Go, which allows a small team like ours to move a lot faster than we normally could.
+        * Go has great cross-compilation support: meaning that building self-contained binaries that runs on various operating systems becomes trivial with Go.
+
+        These advantages combined allowed us to have more features, and have a more solid foundation to build upon. On top of that, ingestr ended up being the fastest data ingestion tool out there based on our benchmarks. It is \~3-5x faster than the closest alternative, up to 20 times faster than some others.
+
+        Ingestr v1 is live now on PyPi, and through our other installation methods: [https://github.com/bruin-data/ingestr](https://github.com/bruin-data/ingestr)
+
+        I would love to hear your thoughts on what we can improve here. Thanks!
+    expected:
+      skip: true
+    notes: |
+      Vendor launch announcement (ingestr v1). REVIEW: whether self-promo counts as skip under the extraction prompt.
+
+  - id: rd-027
+    source_url: https://www.reddit.com/r/SQL/comments/1uy1ky3/  # posted 2026-07-16
+    evidence:
+      title: "What is the difference between delete and truncate?"
+      content: |
+        Delete is used to delete certain records but without where condition all records from the table will be deleted and the structure remains intact.
+
+        Truncate deletes all the records from the table but the structure of the table remains intact.
+
+        So , what is the difference between them if we are using delete without where condition it performs the same function as truncate ?
+    expected:
+      skip: true
+    notes: |
+      SQL learning question (DELETE vs TRUNCATE) with no product feedback.
+
+  - id: rd-028
+    source_url: https://www.reddit.com/r/oracle/comments/1u3bbl5/  # posted 2026-06-11
+    evidence:
+      title: "Steve Miranda has announced his retirement"
+      content: |
+        As of today.
+    expected:
+      skip: true
+    notes: |
+      Low-effort one-line news post about an executive's retirement.
