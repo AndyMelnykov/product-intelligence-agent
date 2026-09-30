@@ -11,6 +11,7 @@ import itertools
 import json
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 SCHEMA_VERSION = 1
@@ -123,3 +124,15 @@ def _save_order(path):
     # Runs saved within the same second are named ...Z.json, ...Z-2.json, ...Z-3.json.
     suffix = _SAVE_SUFFIX_RE.search(path.stem)
     return int(suffix.group(1)) if suffix else 1
+
+
+def save_and_announce(record, results_dir):
+    """Runner helper: save the run and say where. A failed save warns but never fails the run,
+    because the report has already been printed and the API calls already paid for."""
+    try:
+        path = save_run(record, results_dir)
+    except OSError as e:
+        print(f"warning: could not save run results: {e}", file=sys.stderr)
+        return None
+    print(f"\nsaved run to {path}")
+    return path
