@@ -615,3 +615,152 @@ def test_grade_matching_unhashable_or_non_int_index_fails_without_crash():
 
     assert result.status == "failed"
     assert [f.actual for f in result.fields] == ["0 decisions for this index", "0 decisions for this index"]
+
+
+# --- judge calibration cases ---
+
+VALID_JUDGE = """
+    cases:
+      - id: jc-001
+        example_id: db-001
+        evidence:
+          title: "Migration tool times out"
+          content: "It hangs on 40M-row tables."
+        reference_summary: "Migration tool times out on large tables."
+        actual_summary: "Migrations hang because the server runs out of memory."
+        human_verdict: fail
+        notes: "Invents a cause."
+      - id: jc-002
+        evidence:
+          title: "Migration tool times out"
+          content: "It hangs on 40M-row tables."
+        reference_summary: "Migration tool times out on large tables."
+        actual_summary: "Migrations hang on very large tables."
+        human_verdict: pass
+"""
+
+
+def test_load_judge_cases(tmp_path):
+    write(tmp_path, "tuning.yaml", VALID_JUDGE)
+
+    cases = harness.load_golden_dir(tmp_path, "judge")
+
+    assert [c.id for c in cases] == ["jc-001", "jc-002"]
+    first, second = cases
+    assert first.source == "tuning"
+    assert first.example_id == "db-001"
+    assert first.evidence == {"title": "Migration tool times out", "content": "It hangs on 40M-row tables."}
+    assert first.actual_summary == "Migrations hang because the server runs out of memory."
+    assert first.human_verdict == "fail"
+    assert first.notes == "Invents a cause."
+    assert second.example_id is None and second.human_verdict == "pass"
+
+
+@pytest.mark.parametrize("old, new, message", [
+    ("human_verdict: fail", "human_verdict: null", "has not been labeled yet"),
+    ("human_verdict: fail", "human_verdict: FAIL", "'human_verdict' must be 'pass' or 'fail'"),
+    ('actual_summary: "Migrations hang because the server runs out of memory."', "actual_summary: ''",
+     "'actual_summary' must be a non-empty string"),
+    ("example_id: db-001", "example_id: 7", "'example_id' must be a string"),
+])
+def test_load_judge_cases_rejects_bad_cases_naming_file_and_id(tmp_path, old, new, message):
+    write(tmp_path, "tuning.yaml", VALID_JUDGE.replace(old, new, 1))
+
+    with pytest.raises(harness.GoldenSchemaError) as info:
+        harness.load_golden_dir(tmp_path, "judge")
+
+    assert "tuning.yaml [jc-001]" in str(info.value)
+    assert message in str(info.value)
+
+
+def test_load_judge_cases_rejects_missing_cases_list(tmp_path):
+    write(tmp_path, "tuning.yaml", "cases: []\n")
+
+    with pytest.raises(harness.GoldenSchemaError, match=r"tuning\.yaml.*'cases' must be a non-empty list"):
+        harness.load_golden_dir(tmp_path, "judge")
+
+
+def test_load_judge_cases_rejects_duplicate_ids_across_files(tmp_path):
+    write(tmp_path, "a.yaml", VALID_JUDGE)
+    write(tmp_path, "b.yaml", VALID_JUDGE)
+
+    with pytest.raises(harness.GoldenSchemaError, match=r"b\.yaml \[jc-001\].*duplicate id.*a\.yaml"):
+        harness.load_golden_dir(tmp_path, "judge")
+
+
+def test_filter_examples_selects_judge_cases_by_file(tmp_path):
+    write(tmp_path, "tuning.yaml", VALID_JUDGE)
+    write(tmp_path, "holdout.yaml", VALID_JUDGE.replace("jc-00", "jh-00"))
+
+    cases = harness.load_golden_dir(tmp_path, "judge")
+
+    assert [c.id for c in harness.filter_examples(cases, "holdout")] == ["jh-001", "jh-002"]
+
+
+JUDGE_CASE = harness.JudgeCase(
+    id="jc-001", source="tuning",
+    evidence={"title": "Migration tool times out", "content": "It hangs on 40M-row tables."},
+    reference_summary="Migration tool times out on large tables.",
+    actual_summary="Migrations hang because the server runs out of memory.",
+    human_verdict="fail",
+)
+
+
+def test_grade_judge_case_agreement_passes_and_keeps_reason():
+    result = harness.grade_judge_case(JUDGE_CASE, FakeClient([JUDGE_FAIL]))
+
+    assert result.status == "passed"
+    [verdict] = result.fields
+    assert (verdict.field, verdict.expected, verdict.actual, verdict.detail) == (
+        "verdict", "fail", "fail", "Adds a cause the post never states.",
+    )
+
+
+def test_grade_judge_case_disagreement_fails():
+    result = harness.grade_judge_case(JUDGE_CASE, FakeClient([JUDGE_PASS]))
+
+    assert result.status == "failed"
+    assert (result.fields[0].expected, result.fields[0].actual) == ("fail", "pass")
+
+
+def test_grade_judge_case_api_error_is_errored_and_unusable_output_is_failed():
+    errored = harness.grade_judge_case(JUDGE_CASE, FakeClient([RuntimeError("529 overloaded")]))
+    unusable = harness.grade_judge_case(JUDGE_CASE, FakeClient(["no json here"]))
+
+    assert errored.status == "errored" and "529 overloaded" in errored.error
+    assert unusable.status == "failed" and unusable.fields == [] and "non-JSON" in unusable.error
+
+
+def verdict_result(case_id, human, judged):
+    agreed = human == judged
+    return harness.ExampleResult(case_id, "tuning", "passed" if agreed else "failed",
+                                 [harness.FieldResult("verdict", "verdict", human, judged, agreed)])
+
+
+def test_judge_agreement_counts_false_passes_false_fails_and_unusable():
+    results = [
+        verdict_result("a", "pass", "pass"),
+        verdict_result("b", "fail", "fail"),
+        verdict_result("c", "fail", "pass"),
+        verdict_result("d", "pass", "fail"),
+        verdict_result("e", "pass", "fail"),
+        harness.ExampleResult("f", "tuning", "failed", error="judge returned non-JSON response"),
+        harness.ExampleResult("g", "tuning", "errored", error="529"),
+    ]
+
+    assert harness.judge_agreement(results) == harness.JudgeAgreement(
+        graded=6, agreed=2, false_pass=1, false_fail=2, unusable=1, human_pass=3, human_fail=2,
+    )
+
+
+def test_format_judge_agreement():
+    text = harness.format_judge_agreement(harness.JudgeAgreement(6, 2, 1, 2, 1, 3, 2))
+
+    assert "Judge agreement with human labels: 2/6 (33.3%)" in text
+    assert "false pass (judge passed, human failed): 1 of 2 human-failed cases" in text
+    assert "false fail (judge failed, human passed): 2 of 3 human-passed cases" in text
+    assert "unusable judge output: 1" in text
+
+
+def test_format_judge_agreement_with_nothing_graded():
+    assert "0/0 (n/a)" in harness.format_judge_agreement(harness.judge_agreement([]))

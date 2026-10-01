@@ -16,3 +16,9 @@ def test_committed_matching_golden_set_is_valid():
     scenarios = harness.load_golden_dir(GOLDEN_DIR / "matching", "matching")
 
     assert {s.name for s in scenarios} >= {"connection_pooling_duplicate", "mixed_new_and_existing"}
+
+
+def test_committed_judge_calibration_set_is_valid_and_labeled():
+    cases = harness.load_golden_dir(GOLDEN_DIR / "judge", "judge")
+
+    assert {c.human_verdict for c in cases} == {"pass", "fail"}

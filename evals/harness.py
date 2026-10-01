@@ -16,6 +16,7 @@ from evals import judge
 
 ENTITY_KEYS = {"type", "company", "product"}
 EXTRACTION_EXPECTED_KEYS = {"skip", "signal_type", "entity", "effective_date"}
+JUDGE_VERDICTS = ("pass", "fail")
 
 
 class GoldenSchemaError(Exception):
@@ -39,6 +40,19 @@ class MatchingScenario:
     existing_topics: list
     candidates: list
     expected: list
+    notes: str | None = None
+
+
+@dataclass
+class JudgeCase:
+    """A human-labeled judgment of one candidate summary, for measuring the summary judge itself."""
+    id: str
+    source: str
+    evidence: dict
+    reference_summary: str
+    actual_summary: str
+    human_verdict: str
+    example_id: str | None = None
     notes: str | None = None
 
 
@@ -75,9 +89,20 @@ class Report:
     errors: list
 
 
+@dataclass
+class JudgeAgreement:
+    graded: int
+    agreed: int
+    false_pass: int
+    false_fail: int
+    unusable: int
+    human_pass: int
+    human_fail: int
+
+
 def load_golden_dir(path, kind):
-    """Load and validate every .yaml/.yml file in `path`. `kind` is "extraction" or "matching"."""
-    loaders = {"extraction": _load_extraction_file, "matching": _load_matching_file}
+    """Load and validate every .yaml/.yml file in `path`. `kind` is "extraction", "matching", or "judge"."""
+    loaders = {"extraction": _load_extraction_file, "matching": _load_matching_file, "judge": _load_judge_file}
     if kind not in loaders:
         raise ValueError(f"unknown golden kind {kind!r}")
 
@@ -88,9 +113,9 @@ def load_golden_dir(path, kind):
     items, seen = [], {}
     for file_path in files:
         for item in loaders[kind](file_path, _read_yaml(file_path)):
-            key = item.id if kind == "extraction" else item.name
+            key = item.name if kind == "matching" else item.id
             if key in seen:
-                what = "id" if kind == "extraction" else "scenario name"
+                what = "scenario name" if kind == "matching" else "id"
                 _fail(file_path, key, f"duplicate {what}, also defined in {seen[key]}")
             seen[key] = file_path.name
             items.append(item)
@@ -98,10 +123,10 @@ def load_golden_dir(path, kind):
 
 
 def filter_examples(items, name):
-    """Keep extraction examples whose golden file stem is `name`, or the matching scenario named `name`."""
+    """Keep extraction examples / judge cases whose golden file stem is `name`, or the matching scenario named `name`."""
     if name is None:
         return list(items)
-    return [item for item in items if (item.source if isinstance(item, ExtractionExample) else item.name) == name]
+    return [item for item in items if (item.name if isinstance(item, MatchingScenario) else item.source) == name]
 
 
 def _read_yaml(file_path):
@@ -124,6 +149,16 @@ def _require_str(file_path, item_id, mapping, key, allow_empty=False):
     if not isinstance(value, str) or (not allow_empty and not value.strip()):
         _fail(file_path, item_id, f"'{key}' must be a {'' if allow_empty else 'non-empty '}string")
     return value
+
+
+def _parse_evidence(file_path, item_id, raw):
+    evidence = raw.get("evidence")
+    if not isinstance(evidence, dict):
+        _fail(file_path, item_id, "'evidence' must be a mapping")
+    return {
+        "title": _require_str(file_path, item_id, evidence, "title"),
+        "content": _require_str(file_path, item_id, evidence, "content", allow_empty=True),
+    }
 
 
 def _normalize_date(file_path, item_id, value):
@@ -170,13 +205,7 @@ def _parse_extraction_example(file_path, position, raw):
     if not isinstance(example_id, str) or not example_id.strip():
         _fail(file_path, f"#{position}", "'id' must be a non-empty string")
 
-    evidence = raw.get("evidence")
-    if not isinstance(evidence, dict):
-        _fail(file_path, example_id, "'evidence' must be a mapping")
-    evidence = {
-        "title": _require_str(file_path, example_id, evidence, "title"),
-        "content": _require_str(file_path, example_id, evidence, "content", allow_empty=True),
-    }
+    evidence = _parse_evidence(file_path, example_id, raw)
 
     expected = raw.get("expected")
     if not isinstance(expected, dict):
@@ -278,6 +307,40 @@ def _load_matching_file(file_path, data):
         expected=[by_index[i] for i in range(len(candidates))],
         notes=data.get("notes"),
     )]
+
+
+def _load_judge_file(file_path, data):
+    cases = data.get("cases")
+    if not isinstance(cases, list) or not cases:
+        _fail(file_path, None, "'cases' must be a non-empty list")
+    return [_parse_judge_case(file_path, position, raw) for position, raw in enumerate(cases)]
+
+
+def _parse_judge_case(file_path, position, raw):
+    if not isinstance(raw, dict):
+        _fail(file_path, f"#{position}", "case must be a mapping")
+    case_id = raw.get("id")
+    if not isinstance(case_id, str) or not case_id.strip():
+        _fail(file_path, f"#{position}", "'id' must be a non-empty string")
+
+    verdict = raw.get("human_verdict")
+    if verdict not in JUDGE_VERDICTS:
+        hint = " (null means the case has not been labeled yet)" if verdict is None else ""
+        _fail(file_path, case_id, f"'human_verdict' must be 'pass' or 'fail', got {verdict!r}{hint}")
+    example_id = raw.get("example_id")
+    if example_id is not None and not isinstance(example_id, str):
+        _fail(file_path, case_id, "'example_id' must be a string or omitted")
+
+    return JudgeCase(
+        id=case_id,
+        source=file_path.stem,
+        evidence=_parse_evidence(file_path, case_id, raw),
+        reference_summary=_require_str(file_path, case_id, raw, "reference_summary").strip(),
+        actual_summary=_require_str(file_path, case_id, raw, "actual_summary").strip(),
+        human_verdict=verdict,
+        example_id=example_id,
+        notes=raw.get("notes"),
+    )
 
 
 def grade_extraction_example(example, client):
@@ -390,6 +453,53 @@ def _is_complete_new_topic(new_topic):
     return isinstance(new_topic, dict) and all(
         isinstance(new_topic.get(key), str) and new_topic[key].strip() for key in ("name", "slug", "description")
     )
+
+
+def grade_judge_case(case, client):
+    try:
+        verdict = judge.judge_summary(case.evidence, case.reference_summary, case.actual_summary, client)
+    except judge.JudgeAPIError as e:
+        return ExampleResult(case.id, case.source, "errored", error=str(e))
+    except judge.JudgeResponseError as e:
+        return ExampleResult(case.id, case.source, "failed", error=str(e))
+    judged = "pass" if verdict.passed else "fail"
+    return _finish(case.id, case.source, [FieldResult(
+        "verdict", "verdict", case.human_verdict, judged, judged == case.human_verdict, detail=verdict.reason,
+    )])
+
+
+def judge_agreement(results):
+    """Judge-vs-human agreement over graded (non-errored) cases. A case whose judge output could not
+    be parsed counts as graded but not agreed."""
+    counts = Counter()
+    for result in results:
+        if result.status == "errored":
+            continue
+        counts["graded"] += 1
+        verdict = next((f for f in result.fields if f.field == "verdict"), None)
+        if verdict is None:
+            counts["unusable"] += 1
+            continue
+        counts[f"human_{verdict.expected}"] += 1
+        if verdict.passed:
+            counts["agreed"] += 1
+        elif verdict.actual == "pass":
+            counts["false_pass"] += 1
+        else:
+            counts["false_fail"] += 1
+    return JudgeAgreement(**{name: counts[name] for name in (
+        "graded", "agreed", "false_pass", "false_fail", "unusable", "human_pass", "human_fail",
+    )})
+
+
+def format_judge_agreement(agreement):
+    return "\n".join([
+        f"Judge agreement with human labels: {agreement.agreed}/{agreement.graded} "
+        f"({_percent(agreement.agreed, agreement.graded)})",
+        f"  false pass (judge passed, human failed): {agreement.false_pass} of {agreement.human_fail} human-failed cases",
+        f"  false fail (judge failed, human passed): {agreement.false_fail} of {agreement.human_pass} human-passed cases",
+        f"  unusable judge output: {agreement.unusable}",
+    ])
 
 
 def aggregate(results):

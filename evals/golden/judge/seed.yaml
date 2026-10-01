@@ -1,0 +1,77 @@
+# Seed judge-calibration cases: synthetic summaries written against the synthetic extraction seed
+# examples (evals/golden/extraction/database_development.yaml) to exercise both verdicts in CI.
+# Real calibration cases go in tuning.yaml / holdout.yaml -- see README "Tuning the judge rubric".
+cases:
+  - id: js-001
+    example_id: db-001
+    evidence:
+      title: "Postgres migration tool keeps timing out on large tables"
+      content: >
+        Every time I try to run a migration on our biggest table (40M rows) it just
+        hangs and eventually times out. No error message, just nothing.
+    reference_summary: User reports the migration tool times out on large tables with no error message.
+    actual_summary: Migrations hang and time out on a 40M-row table without showing any error.
+    human_verdict: pass
+    notes: Faithful paraphrase with more detail; every detail is in the post.
+
+  - id: js-002
+    example_id: db-001
+    evidence:
+      title: "Postgres migration tool keeps timing out on large tables"
+      content: >
+        Every time I try to run a migration on our biggest table (40M rows) it just
+        hangs and eventually times out. No error message, just nothing.
+    reference_summary: User reports the migration tool times out on large tables with no error message.
+    actual_summary: Migrations time out on large tables because the tool loads the whole table into memory.
+    human_verdict: fail
+    notes: Invents a cause the post never states.
+
+  - id: js-003
+    example_id: db-003
+    evidence:
+      title: "Autocomplete should know about CTE columns"
+      content: >
+        When I write a WITH clause, the editor's autocomplete has no idea what columns
+        the CTE returns, so I end up typing everything by hand. Would be a huge time saver
+        if it could infer them.
+    reference_summary: User wants the SQL editor's autocomplete to suggest columns defined in CTEs.
+    actual_summary: Autocomplete should suggest the columns a WITH-clause CTE returns.
+    human_verdict: pass
+    notes: Same request, different wording.
+
+  - id: js-004
+    example_id: db-003
+    evidence:
+      title: "Autocomplete should know about CTE columns"
+      content: >
+        When I write a WITH clause, the editor's autocomplete has no idea what columns
+        the CTE returns, so I end up typing everything by hand. Would be a huge time saver
+        if it could infer them.
+    reference_summary: User wants the SQL editor's autocomplete to suggest columns defined in CTEs.
+    actual_summary: User has feedback about the SQL editor.
+    human_verdict: fail
+    notes: Too vague to act on.
+
+  - id: js-005
+    example_id: db-004
+    evidence:
+      title: "License price doubled at renewal"
+      content: >
+        Our team renewal quote came in at twice last year's price for the same five seats.
+        Nothing new that we use was added. Hard to justify this to finance.
+    reference_summary: User complains the renewal price doubled for the same seats without added value.
+    actual_summary: Renewal quote doubled for the same five seats with no new features they use.
+    human_verdict: pass
+    notes: Faithful and specific.
+
+  - id: js-006
+    example_id: db-004
+    evidence:
+      title: "License price doubled at renewal"
+      content: >
+        Our team renewal quote came in at twice last year's price for the same five seats.
+        Nothing new that we use was added. Hard to justify this to finance.
+    reference_summary: User complains the renewal price doubled for the same seats without added value.
+    actual_summary: Team is cancelling their license and moving to a competitor after the renewal price doubled.
+    human_verdict: fail
+    notes: Adds switching intent the post does not state.
