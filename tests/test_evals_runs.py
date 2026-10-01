@@ -150,3 +150,101 @@ def test_find_runs_orders_oldest_first_filters_kind_and_skips_bad_files(tmp_path
 
 def test_find_runs_on_missing_dir_finds_nothing(tmp_path):
     assert runs.find_runs(tmp_path / "never-created", "extraction") == ([], [])
+
+
+# --- comparing runs ---
+
+def result(example_id, status, fields=(), error=None):
+    return harness.ExampleResult(example_id, "database_development", status, list(fields), error)
+
+
+BASELINE_RESULTS = [
+    result("db-001", "passed", [fr("signal_type", True)]),
+    result("db-002", "passed", [fr("signal_type", True)]),
+    result("db-003", "failed", [fr("signal_type", False, "reliability_issue", "usability_issue")]),
+    result("db-004", "errored", error="529"),
+    result("db-005", "passed", [fr("signal_type", True)]),
+]
+CURRENT_RESULTS = [
+    result("db-001", "passed", [fr("signal_type", True)]),
+    result("db-002", "failed", [fr("signal_type", False, "reliability_issue", "pricing_complaint")]),
+    result("db-003", "passed", [fr("signal_type", True)]),
+    result("db-004", "passed", [fr("signal_type", True)]),
+    result("db-006", "passed", [fr("signal_type", True)]),
+]
+
+
+def test_compare_runs_classifies_flips_and_computes_rates():
+    comparison = runs.compare_runs(make_record(BASELINE_RESULTS), make_record(CURRENT_RESULTS))
+
+    assert comparison.kind == "extraction"
+    assert comparison.warnings == []
+    assert comparison.pass_rate == (0.75, 0.8)
+    assert comparison.field_accuracy == {"signal_type": ([3, 4], [4, 5])}
+    assert comparison.regressions == [
+        ("database_development/db-002", "signal_type: expected 'reliability_issue', got 'pricing_complaint'"),
+    ]
+    assert comparison.fixes == ["database_development/db-003"]
+    assert comparison.status_changes == [("database_development/db-004", "errored", "passed")]
+    assert comparison.only_in_baseline == ["database_development/db-005"]
+    assert comparison.only_in_current == ["database_development/db-006"]
+
+
+def test_compare_runs_regression_detail_uses_error_when_there_are_no_fields():
+    current = [result("db-001", "failed", error="non-JSON response"), *CURRENT_RESULTS[1:]]
+
+    comparison = runs.compare_runs(make_record(BASELINE_RESULTS), make_record(current))
+
+    assert ("database_development/db-001", "non-JSON response") in comparison.regressions
+
+
+def test_compare_runs_warns_about_everything_that_makes_runs_incomparable():
+    current = make_record(
+        CURRENT_RESULTS,
+        models={"extraction": "claude-sonnet-5-5", "judge": "claude-opus-5"},
+        prompts={"extraction": "aaa111", "judge": "ddd444"},
+        golden="eee555", filter_name="database_development",
+    )
+
+    warnings = runs.compare_runs(make_record(BASELINE_RESULTS), current).warnings
+
+    assert warnings == [
+        "extraction model changed: claude-sonnet-5 -> claude-sonnet-5-5",
+        "judge prompt changed: bbb222 -> ddd444",
+        "golden data changed (examples or labels were added, edited, or removed)",
+        "--filter differs: None -> database_development",
+    ]
+
+
+def test_compare_runs_refuses_different_kinds():
+    with pytest.raises(ValueError, match="extraction run with a matching run"):
+        runs.compare_runs(make_record(), make_record(kind="matching"))
+
+
+def test_format_comparison_shows_every_section():
+    current = make_record(CURRENT_RESULTS, prompts={"extraction": "aaa111", "judge": "ddd444"})
+
+    text = runs.format_comparison(runs.compare_runs(make_record(BASELINE_RESULTS), current))
+
+    assert "== Run comparison (extraction) ==" in text
+    assert "Baseline: 2026-09-29T10:15:00+00:00 @ 39f4032" in text
+    assert "judge prompt changed: bbb222 -> ddd444" in text
+    assert "Pass rate (errored excluded): 75.0% -> 80.0%  (+5.0 pts)" in text
+    assert f"  {'signal_type':<16} 3/4 75.0% -> 4/5 80.0%  (+5.0 pts)" in text
+    assert "Regressions (passed -> failed): 1" in text
+    assert "  database_development/db-002: signal_type: expected 'reliability_issue', got 'pricing_complaint'" in text
+    assert "Fixes (failed -> passed): 1" in text
+    assert "  database_development/db-004: errored -> passed" in text
+    assert "Only in baseline: database_development/db-005" in text
+    assert "Only in current: database_development/db-006" in text
+    text.encode("ascii")  # layout itself adds no non-ASCII characters
+
+
+def test_format_comparison_handles_runs_with_nothing_graded():
+    comparison = runs.compare_runs(make_record([]), make_record([result("db-001", "errored", error="529")]))
+
+    text = runs.format_comparison(comparison)
+
+    assert "Pass rate (errored excluded): n/a -> n/a" in text
+    assert "Regressions (passed -> failed): 0" in text
+    assert "Warnings" not in text

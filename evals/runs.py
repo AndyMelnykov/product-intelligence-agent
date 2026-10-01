@@ -136,3 +136,137 @@ def save_and_announce(record, results_dir):
         return None
     print(f"\nsaved run to {path}")
     return path
+
+
+@dataclasses.dataclass
+class Comparison:
+    kind: str
+    baseline_label: str
+    current_label: str
+    warnings: list
+    pass_rate: tuple
+    field_accuracy: dict
+    regressions: list
+    fixes: list
+    status_changes: list
+    only_in_baseline: list
+    only_in_current: list
+
+
+def compare_runs(baseline, current):
+    """Diff two run records of the same kind. Warnings name every setting that differs between
+    them, so a score change is not blamed on the model when the prompt or golden data moved."""
+    if baseline["kind"] != current["kind"]:
+        raise ValueError(f"cannot compare a {baseline['kind']} run with a {current['kind']} run")
+
+    warnings = []
+    for key, noun in (("models", "model"), ("prompts", "prompt")):
+        before, after = baseline.get(key) or {}, current.get(key) or {}
+        for name in sorted(before.keys() | after.keys()):
+            if before.get(name) != after.get(name):
+                warnings.append(f"{name} {noun} changed: {before.get(name)} -> {after.get(name)}")
+    if baseline.get("golden_fingerprint") != current.get("golden_fingerprint"):
+        warnings.append("golden data changed (examples or labels were added, edited, or removed)")
+    if baseline.get("filter") != current.get("filter"):
+        warnings.append(f"--filter differs: {baseline.get('filter')} -> {current.get('filter')}")
+
+    before_status, after_status = _statuses(baseline), _statuses(current)
+    regressions, fixes, status_changes = [], [], []
+    for key in sorted(before_status.keys() & after_status.keys()):
+        (was, _), (now, why) = before_status[key], after_status[key]
+        if was == now:
+            continue
+        if (was, now) == ("passed", "failed"):
+            regressions.append((key, why))
+        elif (was, now) == ("failed", "passed"):
+            fixes.append(key)
+        else:
+            status_changes.append((key, was, now))
+
+    before_fields = baseline["summary"].get("field_accuracy") or {}
+    after_fields = current["summary"].get("field_accuracy") or {}
+    names = [*before_fields, *(name for name in after_fields if name not in before_fields)]
+
+    return Comparison(
+        kind=baseline["kind"],
+        baseline_label=_label(baseline),
+        current_label=_label(current),
+        warnings=warnings,
+        pass_rate=(_pass_rate(baseline["summary"]), _pass_rate(current["summary"])),
+        field_accuracy={name: (before_fields.get(name), after_fields.get(name)) for name in names},
+        regressions=regressions,
+        fixes=fixes,
+        status_changes=status_changes,
+        only_in_baseline=sorted(before_status.keys() - after_status.keys()),
+        only_in_current=sorted(after_status.keys() - before_status.keys()),
+    )
+
+
+def format_comparison(comparison):
+    lines = [
+        f"== Run comparison ({comparison.kind}) ==",
+        f"Baseline: {comparison.baseline_label}",
+        f"Current:  {comparison.current_label}",
+    ]
+    if comparison.warnings:
+        lines += ["", "Warnings -- a score change may come from these, not only from model behavior:"]
+        lines += [f"  {warning}" for warning in comparison.warnings]
+
+    before, after = comparison.pass_rate
+    lines += ["", f"Pass rate (errored excluded): {_percent(before)} -> {_percent(after)}{_delta(before, after)}"]
+
+    if comparison.field_accuracy:
+        lines += ["", "Per-field accuracy:"]
+        for name, (was, now) in comparison.field_accuracy.items():
+            lines.append(f"  {name:<16} {_counts(was)} -> {_counts(now)}{_delta(_ratio(was), _ratio(now))}")
+
+    lines += ["", f"Regressions (passed -> failed): {len(comparison.regressions)}"]
+    lines += [f"  {key}: {why}" for key, why in comparison.regressions]
+    lines += [f"Fixes (failed -> passed): {len(comparison.fixes)}"]
+    lines += [f"  {key}" for key in comparison.fixes]
+    if comparison.status_changes:
+        lines += ["Other status changes:"]
+        lines += [f"  {key}: {was} -> {now}" for key, was, now in comparison.status_changes]
+    if comparison.only_in_baseline:
+        lines.append(f"Only in baseline: {', '.join(comparison.only_in_baseline)}")
+    if comparison.only_in_current:
+        lines.append(f"Only in current: {', '.join(comparison.only_in_current)}")
+    return "\n".join(lines)
+
+
+def _statuses(record):
+    """{"source/example_id": (status, why it did not pass)} for every result in a run record."""
+    statuses = {}
+    for result in record["results"]:
+        failing = [
+            f"{f.get('label')}: expected {f.get('expected')!r}, got {f.get('actual')!r}"
+            for f in result.get("fields") or [] if not f.get("passed")
+        ]
+        why = result.get("error") or "; ".join(failing)
+        statuses[f"{result.get('source')}/{result.get('example_id')}"] = (result.get("status"), why)
+    return statuses
+
+
+def _label(record):
+    return f"{record.get('started_at')} @ {record.get('git_commit') or 'unknown commit'}"
+
+
+def _pass_rate(summary):
+    graded = summary.get("total", 0) - summary.get("errored", 0)
+    return summary.get("passed", 0) / graded if graded else None
+
+
+def _ratio(counts):
+    return counts[0] / counts[1] if counts and counts[1] else None
+
+
+def _counts(counts):
+    return f"{counts[0]}/{counts[1]} {_percent(_ratio(counts))}" if counts else "n/a"
+
+
+def _percent(rate):
+    return "n/a" if rate is None else f"{100 * rate:.1f}%"
+
+
+def _delta(before, after):
+    return "" if before is None or after is None else f"  ({100 * (after - before):+.1f} pts)"
