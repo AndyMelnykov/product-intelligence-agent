@@ -1,8 +1,9 @@
+import datetime
 import json
 
 import extract
 import match
-from evals import judge, run_extraction_eval, run_matching_eval, runs
+from evals import compare_runs, harness, judge, run_extraction_eval, run_matching_eval, runs
 
 
 class FakeContentBlock:
@@ -111,3 +112,69 @@ def test_unknown_filter_exits_2_without_saving(tmp_path):
 
     assert code == 2
     assert list(tmp_path.iterdir()) == []
+
+
+# --- compare_runs CLI ---
+
+def saved_matching_run(results_dir, started_at, status="passed"):
+    results = [harness.ExampleResult("pooling", "pooling", status, [
+        harness.FieldResult("match_existing", "candidate[0]", "TOPIC-0001",
+                            "TOPIC-0001" if status == "passed" else "NEW: Pooling", status == "passed"),
+    ])]
+    record = runs.build_run_record(
+        "matching", results, harness.aggregate(results), models={"matching": "m"}, prompts={"matching": "p"},
+        golden="g", filter_name=None, started_at=started_at, commit=None,
+    )
+    return runs.save_run(record, results_dir)
+
+
+T0 = datetime.datetime(2026, 9, 29, 9, 0, tzinfo=datetime.timezone.utc)
+
+
+def test_compare_cli_latest_two_of_a_kind(tmp_path, capsys):
+    saved_matching_run(tmp_path, T0)
+    saved_matching_run(tmp_path, T0 + datetime.timedelta(hours=1), status="failed")
+
+    code = compare_runs.main(["--kind", "matching", "--results-dir", str(tmp_path)])
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "Regressions (passed -> failed): 1" in out
+    assert "pooling/pooling: candidate[0]: expected 'TOPIC-0001', got 'NEW: Pooling'" in out
+
+
+def test_compare_cli_pinned_baseline_against_latest(tmp_path, capsys):
+    baseline = saved_matching_run(tmp_path, T0, status="failed")
+    saved_matching_run(tmp_path, T0 + datetime.timedelta(hours=1), status="failed")
+    saved_matching_run(tmp_path, T0 + datetime.timedelta(hours=2))
+
+    code = compare_runs.main([str(baseline), "--results-dir", str(tmp_path)])
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "Current:  2026-09-29T11:00:00+00:00" in out
+    assert "Fixes (failed -> passed): 1" in out
+
+
+def test_compare_cli_skips_junk_files_with_a_warning(tmp_path, capsys):
+    saved_matching_run(tmp_path, T0)
+    saved_matching_run(tmp_path, T0 + datetime.timedelta(hours=1))
+    (tmp_path / "matching-half-written.json").write_text('{"schema_version": 1', encoding="utf-8")
+
+    code = compare_runs.main(["--kind", "matching", "--results-dir", str(tmp_path)])
+
+    captured = capsys.readouterr()
+    assert code == 0
+    assert "skipping unreadable run file" in captured.err and "matching-half-written.json" in captured.err
+
+
+def test_compare_cli_exits_2_on_unusable_input(tmp_path, capsys):
+    saved_matching_run(tmp_path, T0)
+    junk = tmp_path / "junk.json"
+    junk.write_text("{", encoding="utf-8")
+
+    assert compare_runs.main(["--kind", "matching", "--results-dir", str(tmp_path)]) == 2
+    assert "need at least two saved matching runs" in capsys.readouterr().err
+    assert compare_runs.main(["--results-dir", str(tmp_path)]) == 2
+    assert compare_runs.main([str(junk), str(junk)]) == 2
+    assert "junk.json" in capsys.readouterr().err
