@@ -16,9 +16,9 @@ checked against a fixed, human-verified bar and the bar can grow over time.
 - Not a CI gate. Evals hit the real Anthropic API (cost, latency, non-determinism) and
   are run manually or on a schedule, never as part of the GitHub Actions workflow or the
   pytest suite.
-- Not a historical trend-tracking system. v1 prints a report to the console; persisting
-  results across runs to track pass-rate drift over time is a possible future addition,
-  not part of this design.
+- Not a historical trend-tracking system. v1 printed a report to the console only;
+  pairwise run comparison was added later (see Open items), and a multi-run trend view is
+  still out of scope.
 - Not covering `fetch.py`, `report.py`, or `materiality.py` — none of them call Claude
   (confirmed: only `extract.py`, `match.py`, and `credentials.py` import `anthropic`), so
   there's no model judgment to eval there.
@@ -186,10 +186,10 @@ since a malformed golden example is a bug in the eval data itself, not a model r
 
 ## Open items for implementation planning
 
-- Exact wording of the judge rubric prompt in `judge.py`.
-- Whether/how to persist run results (e.g. a timestamped JSON under a gitignored
-  `evals/results/`) for comparing pass rates across runs — default to console-only
-  output for v1, revisit if tracking drift over time becomes valuable.
+- Judge rubric wording: v1 wording shipped. Changes are now measured against the human-labeled
+  calibration set in `evals/golden/judge/` (same plan, Task 6).
+- Run persistence: resolved in `docs/superpowers/plans/2026-09-29-eval-run-history-and-judge-tuning-implementation.md`.
+  Each run is saved as JSON under a gitignored `evals/results/`, and `evals/compare_runs.py` diffs two runs.
 - Final CLI flag surface — `--filter` is required; a `--model` override for testing a
   different model than production's `EXTRACTION_MODEL`/`MATCH_MODEL` is a likely
   addition but not required for v1.

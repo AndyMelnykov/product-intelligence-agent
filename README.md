@@ -369,8 +369,8 @@ calls: extraction (`extract.py`) and topic matching (`match.py`). The runners ca
 production functions against the real Anthropic API. They are **not** run by pytest or CI.
 
 ```powershell
-python evals/run_extraction_eval.py [--filter database_development] [--model claude-sonnet-5]
-python evals/run_matching_eval.py   [--filter connection_pooling_duplicate] [--model claude-sonnet-5]
+python evals/run_extraction_eval.py [--filter database_development] [--model claude-sonnet-5] [--no-save]
+python evals/run_matching_eval.py   [--filter connection_pooling_duplicate] [--model claude-sonnet-5] [--no-save]
 ```
 
 - The API key comes from the OS credential store, the same way the pipeline gets it (`set_credentials.py`).
@@ -378,3 +378,30 @@ python evals/run_matching_eval.py   [--filter connection_pooling_duplicate] [--m
 - The matching eval checks each candidate's decision: it must match the named existing topic, or create a complete new topic when the golden file says `matched_topic_id: null`.
 - Results are classified as `passed`, `failed` (a model mistake, including unusable output), or `errored` (the API call failed, so the example is excluded from accuracy). The exit code is 0 whenever a report is printed. It is 2 for malformed golden YAML, a `--filter` that matches nothing, or missing credentials.
 - Golden data lives in `evals/golden/extraction/<product_area>.yaml` (many examples per file) and `evals/golden/matching/<scenario>.yaml` (one scenario per file). See the design spec at `docs/superpowers/specs/2026-09-24-extraction-matching-evals-design.md` for the format. `tests/test_evals_golden.py` validates the committed golden files in CI.
+
+### Run history and drift
+
+Every runner saves its run to `evals/results/<kind>-<UTC timestamp>.json` (gitignored) unless you pass `--no-save`. A run file records the models, a fingerprint of each prompt, a fingerprint of the golden data it graded, the `--filter`, and the git commit, next to every per-example result.
+
+```powershell
+python evals/compare_runs.py --kind extraction          # latest extraction run vs the one before it
+python evals/compare_runs.py evals/results/extraction-20260929T101500Z.json   # pinned baseline vs latest
+python evals/compare_runs.py BASELINE.json CURRENT.json
+```
+
+The comparison prints pass-rate and per-field deltas, examples that regressed (passed -> failed, with the reason) or were fixed, and examples present in only one run. When the model, a prompt, the golden data or the filter differs between the two runs, it prints a warning block first. Read the deltas as "the model changed its behavior" only when there are no warnings.
+
+### Judge calibration
+
+The summary judge is itself measured against human labels in `evals/golden/judge/*.yaml`. Each case holds evidence, a reference summary, a candidate summary, and `human_verdict: pass|fail`.
+
+```powershell
+python evals/export_judge_cases.py evals/results/extraction-<stamp>.json   # draft unlabeled cases from a real run
+python evals/run_judge_eval.py [--filter tuning|holdout] [--model MODEL]
+```
+
+"Passed" in a judge run means the judge agreed with the human. The report adds false passes (judge accepted a summary the human rejected) and false fails. Label draft cases yourself before looking at what the judge said, add hand-written failing variants so the set contains real fails, and keep `holdout.yaml` out of sight while editing the rubric. Cases with `human_verdict: null` are rejected at load time.
+
+### Tuning the judge rubric
+
+Follow Task 6 of `docs/superpowers/plans/2026-09-29-eval-run-history-and-judge-tuning-implementation.md`: baseline agreement on `tuning` and `holdout`, edit `JUDGE_PROMPT_TEMPLATE` in `evals/judge.py` against the disagreements on `tuning` only, and keep a change only if it does not lose agreement on `holdout` and does not add false passes. After a rubric change, the next extraction comparison will warn `judge prompt changed`. That is expected: summary pass-rate movement across that boundary is the judge, not the extractor.
