@@ -223,7 +223,7 @@ Expected: all pass (106 tests), ruff reports no errors.
 git add extract.py match.py tests/test_extract.py tests/test_match.py tests/test_end_to_end.py
 git commit -m "fix: read the text block from Claude responses so thinking blocks don't break parsing
 
-Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+ 
 ```
 
 ---
@@ -784,7 +784,7 @@ Expected: all pass, no lint errors.
 git add evals/__init__.py evals/harness.py evals/judge.py tests/test_evals_harness.py
 git commit -m "feat(evals): golden-set loader with fail-fast schema validation
 
-Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+ 
 ```
 
 ---
@@ -1065,7 +1065,7 @@ Expected: all pass, no lint errors.
 git add evals/judge.py tests/test_evals_judge.py
 git commit -m "feat(evals): LLM judge for extraction summaries
 
-Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+ 
 ```
 
 ---
@@ -1393,7 +1393,7 @@ Expected: all pass, no lint errors.
 git add evals/harness.py tests/test_evals_harness.py
 git commit -m "feat(evals): grade extraction examples against golden labels
 
-Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+ 
 ```
 
 ---
@@ -1618,7 +1618,7 @@ Expected: all pass, no lint errors.
 git add evals/harness.py tests/test_evals_harness.py
 git commit -m "feat(evals): grade matching scenarios per candidate decision
 
-Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+ 
 ```
 
 ---
@@ -1816,7 +1816,7 @@ Expected: all pass, no lint errors.
 git add evals/harness.py tests/test_evals_harness.py
 git commit -m "feat(evals): aggregate results into a console report
 
-Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+ 
 ```
 
 ---
@@ -2202,7 +2202,7 @@ Expected: all pass, no lint errors. Also confirm pytest did not collect anything
 git add evals/run_extraction_eval.py evals/run_matching_eval.py evals/golden tests/test_evals_golden.py README.md
 git commit -m "feat(evals): CLI runners, seed golden set, and README docs
 
-Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+ 
 ```
 
 - [ ] **Step 9 (optional, costs API credits, needs the key in the credential store): live smoke run**

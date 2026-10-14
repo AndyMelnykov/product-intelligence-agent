@@ -402,7 +402,7 @@ Expected: all pass, `All checks passed!`.
 git add evals/runs.py tests/test_evals_runs.py .gitignore
 git commit -m "feat(evals): save eval runs as JSON records with prompt and golden fingerprints
 
-Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+ 
 ```
 
 ---
@@ -760,7 +760,7 @@ Expected: all pass, `All checks passed!`.
 git add evals/runs.py evals/run_extraction_eval.py evals/run_matching_eval.py tests/test_evals_runners.py
 git commit -m "feat(evals): save every extraction and matching run under evals/results
 
-Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+ 
 ```
 
 ---
@@ -1200,7 +1200,7 @@ Expected: all pass, `All checks passed!`.
 git add evals/runs.py evals/compare_runs.py tests/test_evals_runs.py tests/test_evals_runners.py
 git commit -m "feat(evals): compare two saved runs with deltas, flips, and comparability warnings
 
-Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+ 
 ```
 
 ---
@@ -1670,7 +1670,7 @@ Expected: all pass, `All checks passed!`.
 git add evals/harness.py evals/golden/judge/seed.yaml tests/test_evals_harness.py tests/test_evals_golden.py
 git commit -m "feat(evals): judge calibration cases with human verdicts and agreement scoring
 
-Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+ 
 ```
 
 ---
@@ -2051,7 +2051,7 @@ Expected: all pass, `All checks passed!`.
 git add evals/run_judge_eval.py evals/export_judge_cases.py tests/test_evals_runners.py README.md docs/superpowers/specs/2026-09-24-extraction-matching-evals-design.md
 git commit -m "feat(evals): judge calibration runner, case export from real runs, and docs
 
-Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+ 
 ```
 
 ---
@@ -2097,7 +2097,7 @@ Expected: pass (it would fail on any unlabeled case).
 git add evals/golden/judge/tuning.yaml evals/golden/judge/holdout.yaml
 git commit -m "feat(evals): human-labeled judge calibration set from real extraction output
 
-Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+ 
 ```
 
 - [ ] **Step 5: Baseline judge agreement, 3 runs per split**
@@ -2138,7 +2138,7 @@ Judge agreement with human labels, 3 runs each (min/mean/max):
   tuning:  <before> -> <after>
   holdout: <before> -> <after>; false passes <before> -> <after>
 
-Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+ 
 ```
 
 If nothing changed, add the baseline table to the PR description instead. Either way, run a fresh full extraction eval and `python evals/compare_runs.py --kind extraction` so the new baseline summary pass rate is on record. Put that comparison output (with its `judge prompt changed` warning, if any) in the PR description.

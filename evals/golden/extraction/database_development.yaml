@@ -1,4 +1,4 @@
-# Seed examples: synthetic posts written to exercise every grading path (skip, signal_type,
+# Seed examples: for every grading path (skip, signal_type,
 # entity, effective_date, summary). Replace or extend with ~20 real r/ posts whose labels have
 # been manually verified -- see the spec's "Open items".
 product_area: database_development
