@@ -6,13 +6,14 @@ in scores can be traced to the model, a prompt edit, or a golden-set edit.
 """
 import dataclasses
 import datetime
-import hashlib
 import itertools
 import json
 import re
 import subprocess
 import sys
 from pathlib import Path
+
+from fingerprints import fingerprint
 
 SCHEMA_VERSION = 1
 KINDS = ("extraction", "matching", "judge")
@@ -23,12 +24,6 @@ _SAVE_SUFFIX_RE = re.compile(r"Z-(\d+)$")
 
 class RunFileError(Exception):
     """A run file is missing, unreadable, or not a run record this code understands."""
-
-
-def fingerprint(value):
-    """First 12 hex chars of a SHA-256 over a string, or over any JSON-serializable value."""
-    text = value if isinstance(value, str) else json.dumps(value, sort_keys=True, default=str)
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
 
 
 def golden_fingerprint(items):

@@ -1,5 +1,6 @@
 import json
 import sqlite3
+from datetime import datetime, timezone
 
 DEFAULT_DB_PATH = "data/pi_agent.db"
 
@@ -73,9 +74,50 @@ def connect(path=DEFAULT_DB_PATH):
     return conn
 
 
+# Schema changes after the v0 baseline above. Each entry is (version, function); the function
+# runs inside one transaction together with the PRAGMA user_version bump. Never edit SCHEMA_SQL
+# or renumber an entry that has shipped: append a new migration instead.
+MIGRATIONS = []
+
+
 def init_db(conn):
     conn.executescript(SCHEMA_SQL)
-    conn.commit()
+    apply_migrations(conn)
+
+
+def schema_version(conn):
+    return conn.execute("PRAGMA user_version").fetchone()[0]
+
+
+def apply_migrations(conn, migrations=None):
+    migrations = MIGRATIONS if migrations is None else migrations
+    current = schema_version(conn)
+    for version, migrate in migrations:
+        if version <= current:
+            continue
+        conn.execute("BEGIN")
+        try:
+            migrate(conn)
+            conn.execute(f"PRAGMA user_version = {int(version)}")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+        conn.execute("COMMIT")
+        current = version
+
+
+def _column_names(conn, table):
+    return {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+
+
+def _add_column(conn, table, column_sql):
+    name = column_sql.split()[0]
+    if name not in _column_names(conn, table):
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column_sql}")
+
+
+def utc_now():
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
 def _next_sequence_id(conn, table, id_column, prefix, width):
