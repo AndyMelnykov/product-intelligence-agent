@@ -74,10 +74,37 @@ def connect(path=DEFAULT_DB_PATH):
     return conn
 
 
+def _migration_1_llm_call(conn):
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS llm_call (
+          call_id INTEGER PRIMARY KEY AUTOINCREMENT,
+          stage TEXT NOT NULL,
+          subject_key TEXT NOT NULL,
+          model TEXT NOT NULL,
+          prompt_fingerprint TEXT NOT NULL,
+          request_meta TEXT,
+          status TEXT NOT NULL,
+          raw_response TEXT,
+          parsed TEXT,
+          error TEXT,
+          stop_reason TEXT,
+          input_tokens INTEGER,
+          output_tokens INTEGER,
+          started_at TEXT NOT NULL,
+          finished_at TEXT,
+          applied_at TEXT
+        )"""
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_llm_call_stage_status ON llm_call(stage, status)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_llm_call_subject ON llm_call(stage, subject_key)")
+
+
 # Schema changes after the v0 baseline above. Each entry is (version, function); the function
 # runs inside one transaction together with the PRAGMA user_version bump. Never edit SCHEMA_SQL
 # or renumber an entry that has shipped: append a new migration instead.
-MIGRATIONS = []
+MIGRATIONS = [
+    (1, _migration_1_llm_call),
+]
 
 
 def init_db(conn):
