@@ -33,3 +33,4 @@ Agent-written code is fine here if tests pass:
 - Pass `encoding="utf-8"` to every file read and write.
 - Python 3.11 (CI). No 3.12+ syntax.
 - A prompt change changes the eval fingerprints. Run the affected eval and compare runs (README "Run history and drift").
+- Schema changes are a new numbered entry in `db.MIGRATIONS`. Never edit `SCHEMA_SQL` and never renumber a shipped migration.
