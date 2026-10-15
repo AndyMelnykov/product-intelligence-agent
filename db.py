@@ -99,11 +99,44 @@ def _migration_1_llm_call(conn):
     conn.execute("CREATE INDEX IF NOT EXISTS idx_llm_call_subject ON llm_call(stage, subject_key)")
 
 
+def _migration_2_evidence_identity(conn):
+    _add_column(conn, "evidence", "source_key TEXT")
+    _add_column(conn, "evidence", "duplicate_of TEXT REFERENCES evidence(evidence_id)")
+
+    # Backfill keys for rows fetched before keys existed. The first row per Reddit post keeps the
+    # key; later copies of the same post are marked duplicate_of the first and keep no key.
+    first_by_key = {}
+    for row in conn.execute("SELECT evidence_id, source_type, metadata FROM evidence ORDER BY evidence_id").fetchall():
+        post_id = json.loads(row["metadata"]).get("reddit_post_id")
+        if row["source_type"] != "reddit_post" or not post_id:
+            continue
+        key = f"reddit_post:{post_id}"
+        if key in first_by_key:
+            conn.execute("UPDATE evidence SET duplicate_of = ? WHERE evidence_id = ?", (first_by_key[key], row["evidence_id"]))
+        else:
+            first_by_key[key] = row["evidence_id"]
+            conn.execute("UPDATE evidence SET source_key = ? WHERE evidence_id = ?", (key, row["evidence_id"]))
+
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_evidence_source_key ON evidence(source_key) WHERE source_key IS NOT NULL"
+    )
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS fetch_cursor (
+          source_type TEXT NOT NULL,
+          source_name TEXT NOT NULL,
+          cursor TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          PRIMARY KEY (source_type, source_name)
+        )"""
+    )
+
+
 # Schema changes after the v0 baseline above. Each entry is (version, function); the function
 # runs inside one transaction together with the PRAGMA user_version bump. Never edit SCHEMA_SQL
 # or renumber an entry that has shipped: append a new migration instead.
 MIGRATIONS = [
     (1, _migration_1_llm_call),
+    (2, _migration_2_evidence_identity),
 ]
 
 
@@ -176,16 +209,38 @@ def _signal_candidate_row_to_dict(row):
 
 
 def insert_evidence(conn, *, source_type, source_name, source_url, captured_at,
-                     published_at, title, content, metadata):
+                     published_at, title, content, metadata, source_key=None):
     year = captured_at[:4]
     evidence_id = _next_sequence_id(conn, "evidence", "evidence_id", f"EV-{year}-", 6)
     conn.execute(
         "INSERT INTO evidence (evidence_id, source_type, source_name, source_url, "
-        "captured_at, published_at, title, content, metadata) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "captured_at, published_at, title, content, metadata, source_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (evidence_id, source_type, source_name, source_url, captured_at, published_at,
-         title, content, json.dumps(metadata, sort_keys=True)),
+         title, content, json.dumps(metadata, sort_keys=True), source_key),
     )
     return evidence_id
+
+
+def insert_evidence_if_new(conn, *, source_key, **fields):
+    """Insert unless evidence with this source_key already exists. Returns the new id, or None."""
+    if conn.execute("SELECT 1 FROM evidence WHERE source_key = ?", (source_key,)).fetchone():
+        return None
+    return insert_evidence(conn, source_key=source_key, **fields)
+
+
+def get_fetch_cursor(conn, source_type, source_name):
+    row = conn.execute(
+        "SELECT cursor FROM fetch_cursor WHERE source_type = ? AND source_name = ?", (source_type, source_name)
+    ).fetchone()
+    return row["cursor"] if row else None
+
+
+def set_fetch_cursor(conn, source_type, source_name, cursor):
+    conn.execute(
+        "INSERT INTO fetch_cursor (source_type, source_name, cursor, updated_at) VALUES (?, ?, ?, ?) "
+        "ON CONFLICT(source_type, source_name) DO UPDATE SET cursor = excluded.cursor, updated_at = excluded.updated_at",
+        (source_type, source_name, cursor, utc_now()),
+    )
 
 
 def get_evidence(conn, evidence_id):
