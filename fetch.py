@@ -5,7 +5,7 @@ import prawcore
 
 import db
 from credentials import get_secret
-from state import load_state, save_state
+from state import load_state
 
 REMOVED_MARKERS = {"[deleted]", "[removed]"}
 
@@ -75,26 +75,41 @@ def fetch_new_posts(reddit_client, subreddit_name, last_seen_fullname, limit):
     return posts, newest_fullname
 
 
+SOURCE_TYPE = "reddit_post"
+
+
+def source_key_for(post):
+    return f"{SOURCE_TYPE}:{post['id']}"
+
+
 def run(subreddits, fetch_limit_per_subreddit, state_path="data/state.json",
         db_path="data/pi_agent.db", today=None, reddit_client=None):
+    """Fetch each subreddit and commit its evidence and cursor together. A FetchError for one
+    subreddit doesn't stop the others; the run raises at the end naming every failure."""
     reddit_client = reddit_client or build_reddit_client()
-    state = load_state(state_path)
+    # The cursor used to live in state.json. Read it only as a fallback for subreddits the
+    # database has no cursor for yet; it is never written again.
+    legacy_state = load_state(state_path)
     run_date = today or date.today()
     captured_at = datetime(run_date.year, run_date.month, run_date.day, tzinfo=timezone.utc).isoformat()
 
     conn = db.connect(db_path)
     db.init_db(conn)
-
-    new_state = dict(state)
+    failures = []
     try:
         for subreddit_name in subreddits:
-            last_seen = state.get(subreddit_name)
-            posts, newest = fetch_new_posts(reddit_client, subreddit_name, last_seen, fetch_limit_per_subreddit)
+            last_seen = db.get_fetch_cursor(conn, SOURCE_TYPE, subreddit_name) or legacy_state.get(subreddit_name)
+            try:
+                posts, newest = fetch_new_posts(reddit_client, subreddit_name, last_seen, fetch_limit_per_subreddit)
+            except FetchError as e:
+                failures.append(str(e))
+                continue
 
             for post in posts:
-                db.insert_evidence(
+                db.insert_evidence_if_new(
                     conn,
-                    source_type="reddit_post",
+                    source_key=source_key_for(post),
+                    source_type=SOURCE_TYPE,
                     source_name=subreddit_name,
                     source_url=post["permalink"],
                     captured_at=captured_at,
@@ -103,16 +118,17 @@ def run(subreddits, fetch_limit_per_subreddit, state_path="data/state.json",
                     content=post["selftext"],
                     metadata={"reddit_post_id": post["id"], "score": post["score"], "num_comments": post["num_comments"]},
                 )
-
-            new_state[subreddit_name] = newest
+            if newest:
+                db.set_fetch_cursor(conn, SOURCE_TYPE, subreddit_name, newest)
+            conn.commit()
     except Exception:
         conn.rollback()
-        conn.close()
         raise
+    finally:
+        conn.close()
 
-    conn.commit()
-    conn.close()
-    save_state(state_path, new_state)
+    if failures:
+        raise FetchError("; ".join(failures))
 
 
 if __name__ == "__main__":
