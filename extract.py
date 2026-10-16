@@ -1,9 +1,12 @@
 import json
+from collections import Counter
 
 import anthropic
 
 import db
+import ledger
 from credentials import get_secret
+from llm import reply_from_response
 
 SIGNAL_TYPES = {
     "complaint_rising",
@@ -21,6 +24,8 @@ SIGNAL_TYPES = {
 }
 
 EXTRACTION_MODEL = "claude-sonnet-5"
+MAX_EXTRACTION_ATTEMPTS = 3
+MAX_CONSECUTIVE_API_ERRORS = 5
 
 EXTRACTION_PROMPT_TEMPLATE = """You are analyzing a Reddit post about a software product for product \
 feedback signal extraction.
@@ -61,27 +66,32 @@ def build_extraction_prompt(evidence: dict) -> str:
     )
 
 
-def extract_topic(client, evidence: dict):
-    prompt = build_extraction_prompt(evidence)
-    evidence_label = evidence.get("evidence_id", "<no evidence_id>")
+def _label(evidence):
+    return evidence.get("evidence_id", "<no evidence_id>")
 
+
+def request_extraction(client, evidence):
+    """Make the extraction API call. Returns an LLMReply; raises ExtractionAPIError if the call itself fails."""
     try:
         response = client.messages.create(
             model=EXTRACTION_MODEL,
             max_tokens=4000,
-            messages=[{"role": "user", "content": prompt}],
+            messages=[{"role": "user", "content": build_extraction_prompt(evidence)}],
         )
     except Exception as e:
-        raise ExtractionAPIError(f"evidence {evidence_label}: API call failed: {e}") from e
+        raise ExtractionAPIError(f"evidence {_label(evidence)}: API call failed: {e}") from e
+    return reply_from_response(response)
 
-    # Sonnet 5 runs adaptive thinking by default, so a thinking block may precede the answer.
-    raw_text = next((block.text for block in response.content if block.type == "text"), None)
-    if raw_text is None:
+
+def parse_extraction_reply(reply, evidence_label):
+    if reply.text is None:
         raise ExtractionResponseError(
-            f"evidence {evidence_label}: response has no text block "
-            f"(stop_reason={getattr(response, 'stop_reason', None)!r})"
+            f"evidence {evidence_label}: response has no text block (stop_reason={reply.stop_reason!r})"
         )
+    return parse_extraction_text(reply.text, evidence_label)
 
+
+def parse_extraction_text(raw_text, evidence_label):
     try:
         parsed = json.loads(raw_text)
     except json.JSONDecodeError as e:
@@ -110,36 +120,83 @@ def extract_topic(client, evidence: dict):
     }
 
 
+def extract_topic(client, evidence: dict):
+    return parse_extraction_reply(request_extraction(client, evidence), _label(evidence))
+
+
+def extract_one(conn, client, evidence):
+    """One evidence row through the effect sandwich: record intent (committed), call the model,
+    then commit the outcome together with the ledger result. Returns the outcome name."""
+    evidence_id = evidence["evidence_id"]
+    call_id = ledger.start_call(
+        conn, stage="extract", subject_key=evidence_id, model=EXTRACTION_MODEL,
+        prompt_template=EXTRACTION_PROMPT_TEMPLATE,
+    )
+
+    try:
+        reply = request_extraction(client, evidence)
+    except ExtractionAPIError as e:
+        ledger.finish_call(conn, call_id, status="api_error", error=str(e))
+        db.record_extraction_failure(conn, evidence_id, call_id, count_attempt=False,
+                                     max_attempts=MAX_EXTRACTION_ATTEMPTS)
+        conn.commit()
+        print(f"extraction API error, will retry next run: {e}")
+        return "api_error"
+
+    try:
+        result = parse_extraction_reply(reply, evidence_id)
+    except ExtractionResponseError as e:
+        ledger.finish_call(conn, call_id, status="response_error", reply=reply, error=str(e))
+        status = db.record_extraction_failure(conn, evidence_id, call_id, count_attempt=True,
+                                              max_attempts=MAX_EXTRACTION_ATTEMPTS)
+        conn.commit()
+        print(f"unusable extraction response ({status}): {e}")
+        return "response_error"
+
+    ledger.finish_call(conn, call_id, status="succeeded", reply=reply,
+                       parsed=result if result is not None else {"skip": True})
+    if result is None:
+        db.record_extraction_outcome(conn, evidence_id, "skipped", call_id, decided_by="extractor")
+        outcome = "skipped"
+    else:
+        db.insert_signal_candidate(
+            conn,
+            evidence_id=evidence_id,
+            signal_type=result["signal_type"],
+            summary=result["summary"],
+            confidence=result["confidence"],
+            entity=result["entity"],
+            effective_date=result["effective_date"],
+            llm_call_id=call_id,
+        )
+        db.record_extraction_outcome(conn, evidence_id, "candidate", call_id, decided_by="extractor")
+        outcome = "candidate"
+    conn.commit()
+    return outcome
+
+
 def run(db_path="data/pi_agent.db", today=None, client=None):
     client = client or anthropic.Anthropic(api_key=get_secret("anthropic_api_key"))
     conn = db.connect(db_path)
     db.init_db(conn)
-
-    pending = db.get_evidence_without_candidate(conn)
+    counts = Counter()
     try:
-        for evidence in pending:
-            try:
-                result = extract_topic(client, evidence)
-            except ExtractionError as e:
-                print(f"skipping evidence due to extraction error: {e}")
-                continue
-            if result is not None:
-                db.insert_signal_candidate(
-                    conn,
-                    evidence_id=evidence["evidence_id"],
-                    signal_type=result["signal_type"],
-                    summary=result["summary"],
-                    confidence=result["confidence"],
-                    entity=result["entity"],
-                    effective_date=result["effective_date"],
+        abandoned = ledger.abandon_stale_calls(conn, "extract")
+        if abandoned:
+            print(f"marked {abandoned} interrupted extraction call(s) abandoned; their evidence will be retried")
+        consecutive_api_errors = 0
+        for evidence in db.get_evidence_pending_extraction(conn):
+            outcome = extract_one(conn, client, evidence)
+            counts[outcome] += 1
+            consecutive_api_errors = consecutive_api_errors + 1 if outcome == "api_error" else 0
+            if consecutive_api_errors >= MAX_CONSECUTIVE_API_ERRORS:
+                raise ExtractionAPIError(
+                    f"stopping after {consecutive_api_errors} consecutive API errors; rerun when the API is healthy"
                 )
-    except Exception:
-        conn.rollback()
+    finally:
         conn.close()
-        raise
-
-    conn.commit()
-    conn.close()
+    print(("extraction: " + ", ".join(f"{k}={v}" for k, v in sorted(counts.items()))) if counts
+          else "extraction: nothing pending")
 
 
 if __name__ == "__main__":
