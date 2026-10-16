@@ -150,6 +150,12 @@ def _migration_3_extraction_outcome(conn):
     )
 
 
+def _migration_4_candidate_matching(conn):
+    _add_column(conn, "signal_candidate", "match_call_id INTEGER REFERENCES llm_call(call_id)")
+    _add_column(conn, "signal_candidate", "match_attempts INTEGER NOT NULL DEFAULT 0")
+    _add_column(conn, "signal_candidate", "match_error TEXT")
+
+
 # Schema changes after the v0 baseline above. Each entry is (version, function); the function
 # runs inside one transaction together with the PRAGMA user_version bump. Never edit SCHEMA_SQL
 # or renumber an entry that has shipped: append a new migration instead.
@@ -157,6 +163,7 @@ MIGRATIONS = [
     (1, _migration_1_llm_call),
     (2, _migration_2_evidence_identity),
     (3, _migration_3_extraction_outcome),
+    (4, _migration_4_candidate_matching),
 ]
 
 
@@ -341,15 +348,35 @@ def record_extraction_failure(conn, evidence_id, call_id, *, count_attempt, max_
     return status
 
 
-def set_candidate_topic(conn, candidate_id, topic_id):
-    conn.execute("UPDATE signal_candidate SET topic_id = ? WHERE candidate_id = ?", (topic_id, candidate_id))
+def set_candidate_topic(conn, candidate_id, topic_id, match_call_id=None):
+    conn.execute(
+        "UPDATE signal_candidate SET topic_id = ?, match_call_id = COALESCE(?, match_call_id), match_error = NULL "
+        "WHERE candidate_id = ?",
+        (topic_id, match_call_id, candidate_id),
+    )
 
 
-def get_candidates_without_topic(conn):
-    rows = conn.execute(
-        "SELECT * FROM signal_candidate WHERE topic_id IS NULL ORDER BY candidate_id"
-    ).fetchall()
+def record_match_failure(conn, candidate_id, reason):
+    conn.execute(
+        "UPDATE signal_candidate SET match_attempts = match_attempts + 1, match_error = ? WHERE candidate_id = ?",
+        (reason, candidate_id),
+    )
+
+
+def get_candidates_without_topic(conn, max_attempts=None):
+    sql, params = "SELECT * FROM signal_candidate WHERE topic_id IS NULL", ()
+    if max_attempts is not None:
+        sql, params = sql + " AND match_attempts < ?", (max_attempts,)
+    rows = conn.execute(sql + " ORDER BY candidate_id", params).fetchall()
     return [_signal_candidate_row_to_dict(r) for r in rows]
+
+
+def get_candidates_by_ids(conn, candidate_ids):
+    rows = {r["candidate_id"]: r for r in conn.execute(
+        f"SELECT * FROM signal_candidate WHERE candidate_id IN ({','.join('?' * len(candidate_ids))})",
+        tuple(candidate_ids),
+    )} if candidate_ids else {}
+    return [_signal_candidate_row_to_dict(rows[i]) for i in candidate_ids if i in rows]
 
 
 def get_canonical_topics(conn):

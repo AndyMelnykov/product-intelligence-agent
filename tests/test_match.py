@@ -188,3 +188,74 @@ def test_call_matcher_raises_response_error_when_no_text_block():
 
     with pytest.raises(match.MatchResponseError, match="no text block"):
         match.call_matcher(client, CANDIDATES, EXISTING_TOPICS)
+
+
+def test_apply_matches_groups_candidates_proposing_the_same_new_slug(tmp_path):
+    conn = seed_db(tmp_path)
+    first = seed_candidate(conn, "wants CSV export")
+    second = seed_candidate(conn, "CSV export please")
+    candidates = db.get_candidates_without_topic(conn)
+    new_topic = {"name": "Export to CSV", "slug": "export-to-csv", "description": "CSV export"}
+    decisions = [{"index": 0, "matched_topic_id": None, "new_topic": new_topic},
+                 {"index": 1, "matched_topic_id": None, "new_topic": dict(new_topic)}]
+
+    outcome = match.apply_matches(conn, candidates, decisions, week="2026-W33")
+    conn.commit()
+
+    topic = db.get_canonical_topic_by_slug(conn, "export-to-csv")
+    assert len(db.get_canonical_topics(conn)) == 1
+    assert len(outcome.created) == 1
+    rows = conn.execute("SELECT candidate_id, topic_id FROM signal_candidate ORDER BY candidate_id").fetchall()
+    assert [(r["candidate_id"], r["topic_id"]) for r in rows] == [(first, topic["topic_id"]), (second, topic["topic_id"])]
+    assert db.get_topic_weekly_mentions(conn, topic["topic_id"]) == {"2026-W33": 2}
+
+
+def test_apply_matches_applies_valid_decisions_and_records_invalid_ones(tmp_path):
+    conn = seed_db(tmp_path)
+    topic_id = seed_existing_topic(conn)
+    good = seed_candidate(conn, "dark mode again")
+    bad = seed_candidate(conn, "something")
+    candidates = db.get_candidates_without_topic(conn)
+    decisions = [{"index": 0, "matched_topic_id": topic_id}, {"index": 1, "matched_topic_id": "TOPIC-9999"}]
+
+    outcome = match.apply_matches(conn, candidates, decisions, week="2026-W33")
+    conn.commit()
+
+    assert outcome.matched == 1
+    assert outcome.invalid == [(bad, "unknown topic id 'TOPIC-9999'")]
+    rows = {r["candidate_id"]: dict(r) for r in conn.execute(
+        "SELECT candidate_id, topic_id, match_attempts, match_error FROM signal_candidate")}
+    assert rows[good]["topic_id"] == topic_id
+    assert (rows[bad]["topic_id"], rows[bad]["match_attempts"], rows[bad]["match_error"]) == (
+        None, 1, "unknown topic id 'TOPIC-9999'")
+
+
+def test_apply_matches_survives_a_missing_index_without_key_error(tmp_path):
+    conn = seed_db(tmp_path)
+    seed_candidate(conn, "a")
+    candidates = db.get_candidates_without_topic(conn)
+
+    outcome = match.apply_matches(conn, candidates, [], week="2026-W33")
+
+    assert outcome.invalid[0][1] == "no decision"
+
+
+def test_candidates_at_max_attempts_are_excluded(tmp_path):
+    conn = seed_db(tmp_path)
+    stuck = seed_candidate(conn, "a")
+    fresh = seed_candidate(conn, "b")
+    for _ in range(match.MAX_MATCH_ATTEMPTS):
+        db.record_match_failure(conn, stuck, "bad")
+    conn.commit()
+
+    remaining = db.get_candidates_without_topic(conn, max_attempts=match.MAX_MATCH_ATTEMPTS)
+
+    assert [c["candidate_id"] for c in remaining] == [fresh]
+    assert len(db.get_candidates_without_topic(conn)) == 2
+
+
+def test_get_candidates_by_ids_keeps_the_given_order(tmp_path):
+    conn = seed_db(tmp_path)
+    a = seed_candidate(conn, "a")
+    b = seed_candidate(conn, "b")
+    assert [c["candidate_id"] for c in db.get_candidates_by_ids(conn, [b, a])] == [b, a]
