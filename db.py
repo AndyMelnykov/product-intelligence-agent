@@ -131,12 +131,32 @@ def _migration_2_evidence_identity(conn):
     )
 
 
+def _migration_3_extraction_outcome(conn):
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS evidence_extraction (
+          evidence_id TEXT PRIMARY KEY REFERENCES evidence(evidence_id),
+          status TEXT NOT NULL,
+          attempts INTEGER NOT NULL,
+          decided_by TEXT,
+          last_call_id INTEGER REFERENCES llm_call(call_id),
+          updated_at TEXT NOT NULL
+        )"""
+    )
+    _add_column(conn, "signal_candidate", "llm_call_id INTEGER REFERENCES llm_call(call_id)")
+    conn.execute(
+        "INSERT OR IGNORE INTO evidence_extraction (evidence_id, status, attempts, decided_by, last_call_id, updated_at) "
+        "SELECT DISTINCT evidence_id, 'candidate', 0, 'backfill', NULL, ? FROM signal_candidate",
+        (utc_now(),),
+    )
+
+
 # Schema changes after the v0 baseline above. Each entry is (version, function); the function
 # runs inside one transaction together with the PRAGMA user_version bump. Never edit SCHEMA_SQL
 # or renumber an entry that has shipped: append a new migration instead.
 MIGRATIONS = [
     (1, _migration_1_llm_call),
     (2, _migration_2_evidence_identity),
+    (3, _migration_3_extraction_outcome),
 ]
 
 
@@ -266,7 +286,7 @@ def get_evidence_for_topic(conn, topic_id):
 
 
 def insert_signal_candidate(conn, *, evidence_id, signal_type, summary, confidence, topic_id=None,
-                             entity=None, effective_date=None):
+                             entity=None, effective_date=None, llm_call_id=None):
     evidence = get_evidence(conn, evidence_id)
     if evidence is None:
         raise DBError(f"cannot create signal_candidate: evidence {evidence_id} does not exist")
@@ -274,11 +294,51 @@ def insert_signal_candidate(conn, *, evidence_id, signal_type, summary, confiden
     candidate_id = _next_sequence_id(conn, "signal_candidate", "candidate_id", f"SC-{year}-", 5)
     conn.execute(
         "INSERT INTO signal_candidate (candidate_id, evidence_id, signal_type, topic_id, summary, "
-        "confidence, entity, effective_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        "confidence, entity, effective_date, llm_call_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (candidate_id, evidence_id, signal_type, topic_id, summary, confidence,
-         json.dumps(entity, sort_keys=True) if entity is not None else None, effective_date),
+         json.dumps(entity, sort_keys=True) if entity is not None else None, effective_date, llm_call_id),
     )
     return candidate_id
+
+
+def get_evidence_pending_extraction(conn):
+    """Evidence that is not a duplicate and has either no extraction outcome yet or a retryable one."""
+    rows = conn.execute(
+        "SELECT e.* FROM evidence e LEFT JOIN evidence_extraction x ON x.evidence_id = e.evidence_id "
+        "WHERE e.duplicate_of IS NULL AND (x.evidence_id IS NULL OR x.status = 'retryable') "
+        "ORDER BY e.evidence_id"
+    ).fetchall()
+    return [_evidence_row_to_dict(r) for r in rows]
+
+
+def get_extraction_state(conn, evidence_id):
+    row = conn.execute("SELECT * FROM evidence_extraction WHERE evidence_id = ?", (evidence_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def record_extraction_outcome(conn, evidence_id, status, call_id, *, decided_by):
+    if status not in ("candidate", "skipped"):
+        raise ValueError(f"outcome status must be 'candidate' or 'skipped', got {status!r}")
+    conn.execute(
+        "INSERT INTO evidence_extraction (evidence_id, status, attempts, decided_by, last_call_id, updated_at) "
+        "VALUES (?, ?, 0, ?, ?, ?) ON CONFLICT(evidence_id) DO UPDATE SET status = excluded.status, "
+        "decided_by = excluded.decided_by, last_call_id = excluded.last_call_id, updated_at = excluded.updated_at",
+        (evidence_id, status, decided_by, call_id, utc_now()),
+    )
+
+
+def record_extraction_failure(conn, evidence_id, call_id, *, count_attempt, max_attempts):
+    """Record a failed attempt. Returns the new status: 'retryable', or 'dead' once max_attempts counted failures are reached."""
+    row = conn.execute("SELECT attempts FROM evidence_extraction WHERE evidence_id = ?", (evidence_id,)).fetchone()
+    attempts = (row["attempts"] if row else 0) + (1 if count_attempt else 0)
+    status = "dead" if attempts >= max_attempts else "retryable"
+    conn.execute(
+        "INSERT INTO evidence_extraction (evidence_id, status, attempts, decided_by, last_call_id, updated_at) "
+        "VALUES (?, ?, ?, NULL, ?, ?) ON CONFLICT(evidence_id) DO UPDATE SET status = excluded.status, "
+        "attempts = excluded.attempts, last_call_id = excluded.last_call_id, updated_at = excluded.updated_at",
+        (evidence_id, status, attempts, call_id, utc_now()),
+    )
+    return status
 
 
 def set_candidate_topic(conn, candidate_id, topic_id):

@@ -1,10 +1,12 @@
 import json
+import sqlite3
 from datetime import date
 
 import pytest
 
 import db
 import extract
+import ledger
 
 
 class FakeContentBlock:
@@ -257,3 +259,164 @@ def test_extract_topic_raises_response_error_for_non_string_signal_type():
 
     with pytest.raises(extract.ExtractionResponseError, match="invalid signal_type"):
         extract.extract_topic(client, SAMPLE_EVIDENCE)
+
+
+class SimulatedCrash(BaseException):
+    """Stands in for the process dying: not an Exception, so no handler in the code catches it."""
+
+
+class CrashOnCall:
+    def __init__(self, responses, crash_on):
+        self._responses = list(responses)
+        self._crash_on = crash_on
+        self.calls = 0
+
+    def create(self, **kwargs):
+        self.calls += 1
+        if self.calls == self._crash_on:
+            raise SimulatedCrash()
+        return FakeResponse(self._responses.pop(0))
+
+
+def _seed(tmp_path, n=1, **overrides):
+    db_path = str(tmp_path / "pi_agent.db")
+    conn = db.connect(db_path)
+    db.init_db(conn)
+    ids = []
+    for i in range(n):
+        fields = dict(source_type="reddit_post", source_name="sub", source_url=f"/{i}",
+                      captured_at="2026-08-15T00:00:00+00:00", published_at="2026-08-14T00:00:00+00:00",
+                      title=f"post {i}", content="body", metadata={})
+        fields.update(overrides)
+        ids.append(db.insert_evidence(conn, **fields))
+    conn.commit()
+    conn.close()
+    return db_path, ids
+
+
+VALID = json.dumps({"signal_type": "new_feature_demand", "summary": "s", "confidence": 0.8})
+
+
+def test_skipped_evidence_is_recorded_and_never_sent_again(tmp_path):
+    db_path, [evidence_id] = _seed(tmp_path)
+
+    extract.run(db_path=db_path, client=FakeClient([json.dumps({"skip": True})]))
+    extract.run(db_path=db_path, client=FakeClient([]))  # would raise IndexError if it called the API
+
+    conn = db.connect(db_path)
+    assert db.get_extraction_state(conn, evidence_id)["status"] == "skipped"
+    assert conn.execute("SELECT COUNT(*) FROM signal_candidate").fetchone()[0] == 0
+
+
+def test_candidate_records_provenance_to_its_llm_call(tmp_path):
+    db_path, [evidence_id] = _seed(tmp_path)
+
+    extract.run(db_path=db_path, client=FakeClient([VALID]))
+
+    conn = db.connect(db_path)
+    row = conn.execute("SELECT llm_call_id FROM signal_candidate WHERE evidence_id = ?", (evidence_id,)).fetchone()
+    call = ledger.get_call(conn, row["llm_call_id"])
+    assert call["stage"] == "extract"
+    assert call["subject_key"] == evidence_id
+    assert call["status"] == "succeeded"
+    assert call["raw_response"] == VALID
+    assert call["model"] == extract.EXTRACTION_MODEL
+
+
+def test_unparseable_responses_retry_then_go_dead(tmp_path):
+    db_path, [evidence_id] = _seed(tmp_path)
+
+    for _ in range(extract.MAX_EXTRACTION_ATTEMPTS):
+        extract.run(db_path=db_path, client=FakeClient(["not json"]))
+    extract.run(db_path=db_path, client=FakeClient([]))  # dead rows are not retried
+
+    conn = db.connect(db_path)
+    state = db.get_extraction_state(conn, evidence_id)
+    assert (state["status"], state["attempts"]) == ("dead", extract.MAX_EXTRACTION_ATTEMPTS)
+
+
+def test_api_errors_are_retryable_and_do_not_count_as_attempts(tmp_path):
+    db_path, [evidence_id] = _seed(tmp_path)
+
+    extract.run(db_path=db_path, client=FakeClient([RuntimeError("529 overloaded")]))
+
+    conn = db.connect(db_path)
+    state = db.get_extraction_state(conn, evidence_id)
+    assert (state["status"], state["attempts"]) == ("retryable", 0)
+    conn.close()
+
+    extract.run(db_path=db_path, client=FakeClient([VALID]))
+    conn = db.connect(db_path)
+    assert db.get_extraction_state(conn, evidence_id)["status"] == "candidate"
+
+
+def test_run_stops_after_consecutive_api_errors_without_burning_attempts(tmp_path):
+    db_path, ids = _seed(tmp_path, n=extract.MAX_CONSECUTIVE_API_ERRORS + 2)
+    errors = [RuntimeError("down")] * extract.MAX_CONSECUTIVE_API_ERRORS
+
+    with pytest.raises(extract.ExtractionAPIError, match="consecutive API errors"):
+        extract.run(db_path=db_path, client=FakeClient(errors))
+
+    conn = db.connect(db_path)
+    assert conn.execute("SELECT COUNT(*) FROM evidence_extraction WHERE status = 'dead'").fetchone()[0] == 0
+    assert len(db.get_evidence_pending_extraction(conn)) == len(ids)
+
+
+def test_crash_keeps_completed_rows_and_retries_only_the_interrupted_one(tmp_path):
+    db_path, ids = _seed(tmp_path, n=3)
+    crashing = FakeClient([])
+    crashing.messages = CrashOnCall([VALID], crash_on=2)
+
+    with pytest.raises(SimulatedCrash):
+        extract.run(db_path=db_path, client=crashing)
+
+    conn = db.connect(db_path)
+    assert conn.execute("SELECT COUNT(*) FROM signal_candidate").fetchone()[0] == 1
+    assert conn.execute("SELECT COUNT(*) FROM llm_call WHERE status = 'pending'").fetchone()[0] == 1
+    conn.close()
+
+    extract.run(db_path=db_path, client=FakeClient([VALID, VALID]))
+
+    conn = db.connect(db_path)
+    assert conn.execute("SELECT COUNT(*) FROM signal_candidate").fetchone()[0] == 3
+    statuses = [r[0] for r in conn.execute("SELECT status FROM llm_call ORDER BY call_id")]
+    assert statuses == ["succeeded", "abandoned", "succeeded", "succeeded"]
+
+
+def test_duplicate_evidence_is_not_extracted(tmp_path):
+    db_path, [first, second] = _seed(tmp_path, n=2)
+    conn = db.connect(db_path)
+    conn.execute("UPDATE evidence SET duplicate_of = ? WHERE evidence_id = ?", (first, second))
+    conn.commit()
+    conn.close()
+
+    extract.run(db_path=db_path, client=FakeClient([VALID]))
+
+    conn = db.connect(db_path)
+    assert [r[0] for r in conn.execute("SELECT evidence_id FROM signal_candidate")] == [first]
+
+
+def test_migration_backfills_outcomes_for_extracted_evidence(tmp_path):
+    path = tmp_path / "legacy.db"
+    raw = sqlite3.connect(str(path))
+    raw.executescript(db.SCHEMA_SQL)
+    for evidence_id in ("EV-2026-000001", "EV-2026-000002"):
+        raw.execute(
+            "INSERT INTO evidence (evidence_id, source_type, source_name, source_url, captured_at, published_at, "
+            "title, content, metadata) VALUES (?, 'reddit_post', 'sub', ?, '2026-08-15T00:00:00+00:00', "
+            "'2026-08-14T00:00:00+00:00', 't', 'c', '{}')",
+            (evidence_id, f"/{evidence_id}"),
+        )
+    raw.execute(
+        "INSERT INTO signal_candidate (candidate_id, evidence_id, signal_type, summary, confidence) "
+        "VALUES ('SC-2026-00001', 'EV-2026-000001', 'new_feature_demand', 's', 0.9)"
+    )
+    raw.commit()
+    raw.close()
+
+    conn = db.connect(str(path))
+    db.init_db(conn)
+
+    assert db.get_extraction_state(conn, "EV-2026-000001")["status"] == "candidate"
+    assert db.get_extraction_state(conn, "EV-2026-000001")["decided_by"] == "backfill"
+    assert [e["evidence_id"] for e in db.get_evidence_pending_extraction(conn)] == ["EV-2026-000002"]
