@@ -124,6 +124,8 @@ run_weekly.py
   high / critical) from its trend, volume, confidence, and signal type; `high`/`critical`
   topics get a `material_signal` row and a `product_intelligence.signal.material` event
   appended to `data/events.jsonl`.
+- **ledger.py** — records every model call before and after it is made.
+- **llm.py** — reads model responses the same way everywhere.
 
 Credentials (Reddit API + Anthropic API keys) are stored in the OS credential vault via
 `keyring` — never in a plaintext file, never committed to the repo.
@@ -145,9 +147,11 @@ evidence (source data, immutable)
 **Signal ingestion (fetch → extract → match), per subreddit:**
 
 ```text
-1. fetch.py reads state.json for the last-seen post in r/yourproduct
+1. fetch.py reads the subreddit's cursor from the fetch_cursor table (falling back
+   once to a legacy state.json)
 2. Pulls everything newer via PRAW, drops [deleted]/[removed] posts
 3. Each surviving post becomes one immutable evidence row
+   Posts already stored (same Reddit post id) are skipped, so re-fetching is harmless.
 4. extract.py sends the post's title+body to Claude, asking for a signal_type
    from a fixed enum + a one-line summary + a confidence score (or "skip")
 5. match.py sends this week's new candidates + the existing canonical topic
@@ -175,6 +179,7 @@ evidence (source data, immutable)
 | Trend calculation | Deterministic weighted-average threshold logic in `report.py` | Canonical mention counts and trend direction must be reproducible and auditable — the LLM should never compute them |
 | Materiality scoring | Deterministic rule table in `materiality.py` (signal-type impact class × confidence × trend × mention count) | The same signal type and evidence must always produce the same materiality label; a categorical rule table avoids the "fake mathematical precision" of an LLM-generated score |
 | Writes | Fully autonomous for local storage (SQLite, JSONL); no writes ever leave the local system | The pipeline only reads Reddit and writes to its own database/files — there is no external side effect that would need human approval |
+| Durability | Effect sandwich per model call, recorded in an llm_call ledger | A crash loses at most one call; skips and failures are outcomes, not retries (ADR 005) |
 | Downstream handoff | Emit a `product_intelligence.signal.material` event and stop; don't decide what to do about it | Keeps this repo an evidence system — interpreting a signal and deciding a response belongs to the (separate, not-yet-built) Strategic Signals Agent |
 
 See [docs/decisions/](docs/decisions/) for the fuller reasoning and alternatives
@@ -242,9 +247,7 @@ oversight — see [Limitations](#limitations) and [Vision & roadmap](#vision--ro
 - Every LLM call is exactly one `client.messages.create(...)` with a fixed prompt
   template (`build_extraction_prompt` / `build_matching_prompt`) — no hidden multi-turn
   state to lose track of.
-- Each stage (`fetch`/`extract`/`match`/`materiality`) opens one DB connection, does all
-  its writes, and either commits once at the end or rolls back entirely on any
-  exception — a failed run never leaves a partial write behind.
+- Each stage commits per unit of work: per subreddit (fetch), per evidence row (extract), per stored response and then per applied batch (match), per material signal together with its outbox event (materiality). A crash at any point loses at most the one LLM call in flight, and re-running converges to the same state (see ADR 005). `python query.py health` shows pending, stuck, dead and unflushed work; `python query.py calls --stage extract --status response_error` lists failed calls; `python query.py usage` totals calls and tokens per stage and model.
 - Material signal emission is append-only: one JSON line per event in
   `data/events.jsonl`, never rewritten or deleted.
 - Ad hoc inspection during development: `python query.py topic <slug>`,
@@ -282,6 +285,7 @@ pytest -v
 
 ## Limitations
 
+- **One process at a time.** Crash recovery assumes no other pipeline process is running against the same database.
 - **Extraction/matching quality is unmeasured.** No evaluation harness scores
   signal-type accuracy, false-merge rate, or materiality precision against labeled
   examples — see [Evaluation](#evaluation).

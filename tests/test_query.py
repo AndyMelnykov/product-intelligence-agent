@@ -2,7 +2,9 @@ import json
 import sys
 
 import db
+import ledger
 import query
+from llm import LLMReply
 
 
 def seed_db(tmp_path):
@@ -118,3 +120,30 @@ def test_signal_command_reports_unknown_id(tmp_path, capsys):
 
     conn.close()
     assert "no material signal found" in capsys.readouterr().out
+
+
+def test_health_command_reports_pipeline_counts(tmp_path, capsys):
+    conn = db.connect(seed_db(tmp_path))
+
+    query.health_command(conn)
+
+    output = json.loads(capsys.readouterr().out)
+    assert output["candidates_unmatched"] == 0
+    assert set(output) >= {"evidence_pending_extraction", "extraction_dead", "llm_calls_abandoned", "events_unflushed"}
+
+
+def test_calls_and_usage_commands(tmp_path, capsys):
+    conn = db.connect(seed_db(tmp_path))
+    call_id = ledger.start_call(conn, stage="extract", subject_key="EV-x", model="claude-sonnet-5", prompt_template="T")
+    ledger.finish_call(conn, call_id, status="response_error", error="non-JSON",
+                       reply=LLMReply(text="oops", stop_reason="end_turn", input_tokens=100, output_tokens=7))
+    conn.commit()
+
+    query.calls_command(conn, stage="extract", status="response_error", limit=5)
+    calls = json.loads(capsys.readouterr().out)
+    assert [c["error"] for c in calls] == ["non-JSON"]
+    assert "raw_response" not in calls[0]
+
+    query.usage_command(conn, since=None)
+    usage = json.loads(capsys.readouterr().out)
+    assert usage == [{"stage": "extract", "model": "claude-sonnet-5", "calls": 1, "input_tokens": 100, "output_tokens": 7}]
