@@ -6,11 +6,14 @@ from datetime import date
 import anthropic
 
 import db
+import ledger
 from credentials import get_secret
+from llm import reply_from_response
 from weekutil import iso_week_string
 
 MATCH_MODEL = "claude-sonnet-5"
 MAX_MATCH_ATTEMPTS = 3
+MATCH_RETRY_ROUNDS = 1
 
 MATCHING_PROMPT_TEMPLATE = """You are matching newly observed product feedback signals against a \
 canonical registry of existing topics for the same product.
@@ -62,31 +65,31 @@ def build_matching_prompt(candidates, existing_topics):
     )
 
 
-def call_matcher(client, candidates, existing_topics):
-    if not candidates:
-        return []
-
-    prompt = build_matching_prompt(candidates, existing_topics)
+def request_matching(client, candidates, existing_topics):
     try:
         response = client.messages.create(
             model=MATCH_MODEL,
             max_tokens=8000,
-            messages=[{"role": "user", "content": prompt}],
+            messages=[{"role": "user", "content": build_matching_prompt(candidates, existing_topics)}],
         )
     except Exception as e:
         raise MatchAPIError(f"matching call failed: {e}") from e
+    return reply_from_response(response)
 
-    # Sonnet 5 runs adaptive thinking by default, so a thinking block may precede the answer.
-    raw_text = next((block.text for block in response.content if block.type == "text"), None)
-    if raw_text is None:
-        raise MatchResponseError(
-            f"matching response has no text block (stop_reason={getattr(response, 'stop_reason', None)!r})"
-        )
 
+def parse_matching_reply(reply):
+    if reply.text is None:
+        raise MatchResponseError(f"matching response has no text block (stop_reason={reply.stop_reason!r})")
     try:
-        return json.loads(raw_text)
+        return json.loads(reply.text)
     except json.JSONDecodeError as e:
-        raise MatchResponseError(f"matching call returned non-JSON response: {raw_text!r}") from e
+        raise MatchResponseError(f"matching call returned non-JSON response: {reply.text!r}") from e
+
+
+def call_matcher(client, candidates, existing_topics):
+    if not candidates:
+        return []
+    return parse_matching_reply(request_matching(client, candidates, existing_topics))
 
 
 _SLUG_JUNK_RE = re.compile(r"[^a-z0-9]+")
@@ -209,6 +212,64 @@ def apply_matches(conn, candidates, decisions, week):
     return apply_resolutions(conn, candidates, resolve_decisions(candidates, decisions, existing), week)
 
 
+def match_batch(conn, client, candidates, week):
+    """One matching call through the effect sandwich. The response is committed before it is
+    applied, so a crash while applying loses no paid work: replay_unapplied() finishes the job."""
+    existing = db.get_canonical_topics(conn)
+    call_id = ledger.start_call(
+        conn, stage="match", subject_key=f"{week}:{candidates[0]['candidate_id']}", model=MATCH_MODEL,
+        prompt_template=MATCHING_PROMPT_TEMPLATE,
+        request_meta={
+            "week": week,
+            "candidate_ids": [c["candidate_id"] for c in candidates],
+            "topic_ids": [t["topic_id"] for t in existing],
+        },
+    )
+    try:
+        reply = request_matching(client, candidates, existing)
+    except MatchAPIError as e:
+        ledger.finish_call(conn, call_id, status="api_error", error=str(e))
+        conn.commit()
+        raise
+    try:
+        decisions = parse_matching_reply(reply)
+    except MatchResponseError as e:
+        ledger.finish_call(conn, call_id, status="response_error", reply=reply, error=str(e))
+        for candidate in candidates:
+            db.record_match_failure(conn, candidate["candidate_id"], str(e))
+        conn.commit()
+        raise
+
+    ledger.finish_call(conn, call_id, status="succeeded", reply=reply, parsed=decisions)
+    conn.commit()
+    return _apply_call(conn, call_id, candidates, decisions, week, existing)
+
+
+def _apply_call(conn, call_id, candidates, decisions, week, existing):
+    resolutions = resolve_decisions(candidates, decisions, existing)
+    outcome = apply_resolutions(conn, candidates, resolutions, week, match_call_id=call_id)
+    ledger.mark_applied(conn, call_id)
+    conn.commit()
+    return outcome
+
+
+def replay_unapplied(conn):
+    """Apply matching responses that were paid for and stored but never applied (a crash between
+    the two commits). Uses the week recorded with the call. Returns how many were replayed."""
+    replayed = 0
+    for call in ledger.get_unapplied_calls(conn, "match"):
+        meta = call["request_meta"] or {}
+        candidates = db.get_candidates_by_ids(conn, meta.get("candidate_ids", []))
+        if len(candidates) != len(meta.get("candidate_ids", [])) or any(c["topic_id"] for c in candidates):
+            print(f"match call {call['call_id']}: candidates changed since the call; not replaying it")
+            ledger.mark_applied(conn, call["call_id"])
+            conn.commit()
+            continue
+        _apply_call(conn, call["call_id"], candidates, call["parsed"], meta["week"], db.get_canonical_topics(conn))
+        replayed += 1
+    return replayed
+
+
 def run(db_path="data/pi_agent.db", today=None, client=None):
     week = iso_week_string(today or date.today())
     conn = db.connect(db_path)
@@ -216,17 +277,21 @@ def run(db_path="data/pi_agent.db", today=None, client=None):
 
     client = client or anthropic.Anthropic(api_key=get_secret("anthropic_api_key"))
     try:
-        candidates = db.get_candidates_without_topic(conn)
-        existing_topics = db.get_canonical_topics(conn)
-        decisions = call_matcher(client, candidates, existing_topics)
-        apply_matches(conn, candidates, decisions, week)
-    except Exception:
-        conn.rollback()
+        ledger.abandon_stale_calls(conn, "match")
+        replayed = replay_unapplied(conn)
+        if replayed:
+            print(f"matching: applied {replayed} stored response(s) from an interrupted run")
+        for _ in range(1 + MATCH_RETRY_ROUNDS):
+            candidates = db.get_candidates_without_topic(conn, max_attempts=MAX_MATCH_ATTEMPTS)
+            if not candidates:
+                break
+            outcome = match_batch(conn, client, candidates, week)
+            print(f"matching: {outcome.matched} matched, {len(outcome.created)} new topics, "
+                  f"{len(outcome.invalid)} invalid")
+            if not outcome.invalid:
+                break
+    finally:
         conn.close()
-        raise
-
-    conn.commit()
-    conn.close()
 
 
 if __name__ == "__main__":
