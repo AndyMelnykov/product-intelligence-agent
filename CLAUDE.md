@@ -16,7 +16,7 @@ A human designs these. Change them only when asked to, and call the change out i
 - The schema in `db.py`: `SCHEMA_SQL` and `MIGRATIONS`. Data outlives code, and a bad migration corrupts history.
 - LLM prompt and response contracts: every `*_PROMPT_TEMPLATE`, the parsers, `SIGNAL_TYPES`.
 - The `materiality.py` rule table and thresholds, and the trend math in `report.py` (ADR 003).
-- What each stage commits, and when.
+- What each stage commits, and when (ADR 005). Model calls go through `ledger.py`; don't call `client.messages.create` from a stage without it.
 - Golden labels in `evals/golden/`. A human decides what is correct.
 
 Agent-written code is fine here if tests pass:

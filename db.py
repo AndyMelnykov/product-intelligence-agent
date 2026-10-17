@@ -518,3 +518,43 @@ def get_candidates_for_topic(conn, topic_id):
         (topic_id,),
     ).fetchall()
     return [dict(r) for r in rows]
+
+
+def pipeline_health(conn, *, max_match_attempts):
+    def count(sql, params=()):
+        return conn.execute(sql, params).fetchone()[0]
+
+    return {
+        "evidence_pending_extraction": len(get_evidence_pending_extraction(conn)),
+        "extraction_dead": count("SELECT COUNT(*) FROM evidence_extraction WHERE status = 'dead'"),
+        "duplicate_evidence": count("SELECT COUNT(*) FROM evidence WHERE duplicate_of IS NOT NULL"),
+        "candidates_unmatched": count(
+            "SELECT COUNT(*) FROM signal_candidate WHERE topic_id IS NULL AND match_attempts < ?", (max_match_attempts,)),
+        "candidates_stuck": count(
+            "SELECT COUNT(*) FROM signal_candidate WHERE topic_id IS NULL AND match_attempts >= ?", (max_match_attempts,)),
+        "llm_calls_pending": count("SELECT COUNT(*) FROM llm_call WHERE status = 'pending'"),
+        "llm_calls_abandoned": count("SELECT COUNT(*) FROM llm_call WHERE status = 'abandoned'"),
+        "match_responses_unapplied": count(
+            "SELECT COUNT(*) FROM llm_call WHERE stage = 'match' AND status = 'succeeded' AND applied_at IS NULL"),
+        "events_unflushed": count("SELECT COUNT(*) FROM event_outbox WHERE emitted_at IS NULL"),
+    }
+
+
+def list_llm_calls(conn, *, stage=None, status=None, limit=20):
+    sql, params = ("SELECT call_id, stage, subject_key, model, prompt_fingerprint, status, error, stop_reason, "
+                   "input_tokens, output_tokens, started_at, finished_at, applied_at FROM llm_call WHERE 1 = 1"), []
+    if stage:
+        sql, params = sql + " AND stage = ?", [*params, stage]
+    if status:
+        sql, params = sql + " AND status = ?", [*params, status]
+    rows = conn.execute(sql + " ORDER BY call_id DESC LIMIT ?", (*params, limit)).fetchall()
+    return [dict(r) for r in rows]
+
+
+def llm_usage(conn, *, since=None):
+    sql, params = ("SELECT stage, model, COUNT(*) AS calls, COALESCE(SUM(input_tokens), 0) AS input_tokens, "
+                   "COALESCE(SUM(output_tokens), 0) AS output_tokens FROM llm_call"), ()
+    if since:
+        sql, params = sql + " WHERE started_at >= ?", (since,)
+    rows = conn.execute(sql + " GROUP BY stage, model ORDER BY stage, model", params).fetchall()
+    return [dict(r) for r in rows]
