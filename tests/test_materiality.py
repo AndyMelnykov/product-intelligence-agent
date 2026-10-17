@@ -1,5 +1,8 @@
 import json
+import sqlite3
 from datetime import date
+
+import pytest
 
 import db
 import materiality
@@ -251,3 +254,127 @@ def test_run_skips_topics_with_no_new_evidence_this_week(tmp_path):
     signals = conn.execute("SELECT signal_id FROM material_signal").fetchall()
     conn.close()
     assert signals == []
+
+
+def _seed_high_topic(db_path):
+    """A topic that crosses the 'high' threshold in 2026-W33 (same shape as the existing high test)."""
+    conn = db.connect(db_path)
+    db.init_db(conn)
+    topic_id = db.insert_canonical_topic(
+        conn, slug="dark-mode-support", name="Dark mode support", description="d",
+        aliases=[], first_seen="2026-W30", last_seen="2026-W30",
+    )
+    for week in ("2026-W30", "2026-W31", "2026-W32"):
+        db.increment_topic_weekly_mentions(conn, topic_id, week, amount=1)
+    for i in range(6):
+        evidence_id = db.insert_evidence(
+            conn, source_type="reddit_post", source_name="sub", source_url=f"/p{i}",
+            captured_at="2026-08-15T00:00:00+00:00", published_at="2026-08-14T00:00:00+00:00",
+            title="t", content="c", metadata={},
+        )
+        db.insert_signal_candidate(conn, evidence_id=evidence_id, signal_type="new_feature_demand",
+                                   summary="s", confidence=0.9, topic_id=topic_id)
+    db.increment_topic_weekly_mentions(conn, topic_id, "2026-W33", amount=6)
+    conn.commit()
+    conn.close()
+    return topic_id
+
+
+def _lines(path):
+    with open(path, "r", encoding="utf-8") as f:
+        return [json.loads(line) for line in f]
+
+
+def test_rerunning_the_same_week_creates_no_duplicate_signal_or_event(tmp_path):
+    db_path, events = str(tmp_path / "pi_agent.db"), tmp_path / "events.jsonl"
+    _seed_high_topic(db_path)
+
+    materiality.run(db_path=db_path, today=date(2026, 8, 15), events_path=str(events))
+    materiality.run(db_path=db_path, today=date(2026, 8, 15), events_path=str(events))
+
+    conn = db.connect(db_path)
+    assert conn.execute("SELECT COUNT(*) FROM material_signal").fetchone()[0] == 1
+    assert conn.execute("SELECT week FROM material_signal").fetchone()[0] == "2026-W33"
+    assert len(_lines(events)) == 1
+
+
+def test_escalation_within_a_week_emits_a_second_signal(tmp_path, monkeypatch):
+    db_path, events = str(tmp_path / "pi_agent.db"), tmp_path / "events.jsonl"
+    _seed_high_topic(db_path)
+    materiality.run(db_path=db_path, today=date(2026, 8, 15), events_path=str(events))
+
+    real = materiality.classify_materiality
+    monkeypatch.setattr(materiality, "classify_materiality",
+                        lambda **kw: {**real(**kw), "label": "critical", "score": 0.95})
+    materiality.run(db_path=db_path, today=date(2026, 8, 15), events_path=str(events))
+
+    conn = db.connect(db_path)
+    labels = [r[0] for r in conn.execute("SELECT materiality_label FROM material_signal ORDER BY signal_id")]
+    assert labels == ["high", "critical"]
+    reasons = json.loads(conn.execute(
+        "SELECT materiality_reasons FROM material_signal WHERE materiality_label = 'critical'").fetchone()[0])
+    assert any(r.startswith("escalated from high") for r in reasons)
+    assert len(_lines(events)) == 2
+
+
+def test_event_committed_but_never_written_is_flushed_on_the_next_run(tmp_path, monkeypatch):
+    db_path, events = str(tmp_path / "pi_agent.db"), tmp_path / "events.jsonl"
+    _seed_high_topic(db_path)
+    real_flush = materiality.flush_outbox
+    calls = {"n": 0}
+
+    def flush_then_crash_on_the_final_flush(conn, events_path):
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise RuntimeError("crash after commit, before writing events")
+        return real_flush(conn, events_path)
+
+    monkeypatch.setattr(materiality, "flush_outbox", flush_then_crash_on_the_final_flush)
+    with pytest.raises(RuntimeError):
+        materiality.run(db_path=db_path, today=date(2026, 8, 15), events_path=str(events))
+    assert not events.exists()
+
+    monkeypatch.setattr(materiality, "flush_outbox", real_flush)
+    materiality.run(db_path=db_path, today=date(2026, 8, 15), events_path=str(events))
+
+    assert len(_lines(events)) == 1
+
+
+def test_flush_skips_signals_already_in_the_events_file(tmp_path):
+    db_path, events = str(tmp_path / "pi_agent.db"), tmp_path / "events.jsonl"
+    conn = db.connect(db_path)
+    db.init_db(conn)
+    envelope = {"event": materiality.EVENT_NAME, "signal": {"signal_id": "SIG-2026-0001"}}
+    events.write_text(json.dumps(envelope) + "\n", encoding="utf-8")
+    db.insert_material_signal(
+        conn, created_at="2026-08-15T00:00:00+00:00", signal_type="new_feature_demand", topic_id=None,
+        entity={}, summary="s", confidence_label="high", materiality_label="high", materiality_score=0.8,
+        materiality_reasons=[], evidence_ids=[], change_type="trend_change",
+        recommended_next_step="strategic_assessment", week="2026-W33",
+    )
+    db.enqueue_event(conn, "SIG-2026-0001", envelope)
+    conn.commit()
+
+    assert materiality.flush_outbox(conn, str(events)) == 0
+    assert db.get_pending_outbox(conn) == []
+    assert len(_lines(events)) == 1
+
+
+def test_migration_marks_existing_signals_as_already_emitted(tmp_path):
+    path = tmp_path / "legacy.db"
+    raw = sqlite3.connect(str(path))
+    raw.executescript(db.SCHEMA_SQL)
+    raw.execute(
+        "INSERT INTO material_signal (signal_id, created_at, signal_type, topic_id, entity, summary, confidence_label, "
+        "materiality_label, materiality_score, materiality_reasons, evidence_ids, change_type, recommended_next_step) "
+        "VALUES ('SIG-2026-0001', '2026-08-15T00:00:00+00:00', 'x', NULL, '{}', 's', 'high', 'high', 0.8, '[]', "
+        "'[]', 'trend_change', 'strategic_assessment')"
+    )
+    raw.commit()
+    raw.close()
+
+    conn = db.connect(str(path))
+    db.init_db(conn)
+
+    assert conn.execute("SELECT week FROM material_signal").fetchone()[0] == "2026-W33"
+    assert db.get_pending_outbox(conn) == []

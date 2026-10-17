@@ -22,6 +22,7 @@ EVENT_DRIVEN_CRITICAL_SIGNAL_TYPES = {
 }
 
 MATERIALITY_LABEL_SCORE = {"low": 0.2, "medium": 0.5, "high": 0.8, "critical": 0.95}
+LABEL_RANK = {"low": 0, "medium": 1, "high": 2, "critical": 3}
 
 CONFIDENCE_HIGH_THRESHOLD = 0.85
 CONFIDENCE_MEDIUM_THRESHOLD = 0.6
@@ -104,8 +105,8 @@ EVENT_VERSION = "1.0"
 DEFAULT_EVENTS_PATH = "data/events.jsonl"
 
 
-def emit_event(material_signal, events_path=DEFAULT_EVENTS_PATH):
-    envelope = {
+def build_envelope(material_signal):
+    return {
         "event": EVENT_NAME,
         "event_version": EVENT_VERSION,
         "timestamp": material_signal["created_at"],
@@ -118,10 +119,48 @@ def emit_event(material_signal, events_path=DEFAULT_EVENTS_PATH):
             "evidence_ids": material_signal["evidence_ids"],
         },
     }
+
+
+def _append_event(envelope, events_path):
     os.makedirs(os.path.dirname(events_path) or ".", exist_ok=True)
     with open(events_path, "a", encoding="utf-8") as f:
         f.write(json.dumps(envelope) + "\n")
+
+
+def emit_event(material_signal, events_path=DEFAULT_EVENTS_PATH):
+    envelope = build_envelope(material_signal)
+    _append_event(envelope, events_path)
     return envelope
+
+
+def _emitted_signal_ids(events_path):
+    if not os.path.exists(events_path):
+        return set()
+    ids = set()
+    with open(events_path, "r", encoding="utf-8") as f:
+        for line in f:
+            try:
+                ids.add(json.loads(line)["signal"]["signal_id"])
+            except (json.JSONDecodeError, KeyError, TypeError):
+                continue
+    return ids
+
+
+def flush_outbox(conn, events_path=DEFAULT_EVENTS_PATH):
+    """Append every pending outbox event to events.jsonl, skipping signal_ids the file already
+    has (a crash between appending and marking). Commits per event. Returns how many were written."""
+    pending = db.get_pending_outbox(conn)
+    if not pending:
+        return 0
+    already = _emitted_signal_ids(events_path)
+    written = 0
+    for row in pending:
+        if row["signal_id"] not in already:
+            _append_event(row["envelope"], events_path)
+            written += 1
+        db.mark_outbox_emitted(conn, row["outbox_id"])
+        conn.commit()
+    return written
 
 
 def _week_of_iso_timestamp(iso_timestamp):
@@ -133,14 +172,15 @@ def run(db_path="data/pi_agent.db", trend_window_weeks=8, today=None, events_pat
     week = iso_week_string(run_date)
     conn = db.connect(db_path)
     db.init_db(conn)
-
-    topics = db.get_canonical_topics(conn)
-    for topic in topics:
-        topic["weekly_mentions"] = db.get_topic_weekly_mentions(conn, topic["topic_id"])
-    trend_by_topic_id = {row["id"]: row for row in report.compute_trends(topics, week, trend_window_weeks)}
-
-    created_signals = []
     try:
+        # Events an earlier run committed but never wrote (it died between the two steps).
+        flush_outbox(conn, events_path)
+
+        topics = db.get_canonical_topics(conn)
+        for topic in topics:
+            topic["weekly_mentions"] = db.get_topic_weekly_mentions(conn, topic["topic_id"])
+        trend_by_topic_id = {row["id"]: row for row in report.compute_trends(topics, week, trend_window_weeks)}
+
         for topic in topics:
             candidates = db.get_candidates_for_topic(conn, topic["topic_id"])
             candidates_this_week = [c for c in candidates if _week_of_iso_timestamp(c["captured_at"]) == week]
@@ -157,21 +197,28 @@ def run(db_path="data/pi_agent.db", trend_window_weeks=8, today=None, events_pat
             if materiality_result["label"] not in ("high", "critical"):
                 continue
 
+            previous = db.get_latest_material_signal_for_topic_week(conn, topic["topic_id"], week)
+            if previous and LABEL_RANK[previous["materiality_label"]] >= LABEL_RANK[materiality_result["label"]]:
+                continue
+            if previous:
+                materiality_result = {**materiality_result, "reasons": [
+                    *materiality_result["reasons"],
+                    f"escalated from {previous['materiality_label']} ({previous['signal_id']}) earlier this week",
+                ]}
+
             material_signal = build_material_signal(
                 topic, candidates_this_week, trend_row["trend"], materiality_result, run_date,
             )
-            signal_id = db.insert_material_signal(conn, **material_signal)
-            created_signals.append({**material_signal, "signal_id": signal_id})
+            signal_id = db.insert_material_signal(conn, **material_signal, week=week)
+            db.enqueue_event(conn, signal_id, build_envelope({**material_signal, "signal_id": signal_id}))
+        conn.commit()
+
+        flush_outbox(conn, events_path)
     except Exception:
         conn.rollback()
-        conn.close()
         raise
-
-    conn.commit()
-    conn.close()
-
-    for material_signal in created_signals:
-        emit_event(material_signal, events_path=events_path)
+    finally:
+        conn.close()
 
 
 if __name__ == "__main__":

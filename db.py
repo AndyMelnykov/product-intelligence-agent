@@ -2,6 +2,8 @@ import json
 import sqlite3
 from datetime import datetime, timezone
 
+from weekutil import iso_week_string
+
 DEFAULT_DB_PATH = "data/pi_agent.db"
 
 SCHEMA_SQL = """
@@ -156,6 +158,28 @@ def _migration_4_candidate_matching(conn):
     _add_column(conn, "signal_candidate", "match_error TEXT")
 
 
+def _migration_5_signal_week_and_outbox(conn):
+    _add_column(conn, "material_signal", "week TEXT")
+    for row in conn.execute("SELECT signal_id, created_at FROM material_signal WHERE week IS NULL").fetchall():
+        week = iso_week_string(datetime.fromisoformat(row["created_at"]).date())
+        conn.execute("UPDATE material_signal SET week = ? WHERE signal_id = ?", (week, row["signal_id"]))
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_material_signal_topic_week ON material_signal(topic_id, week)")
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS event_outbox (
+          outbox_id INTEGER PRIMARY KEY AUTOINCREMENT,
+          signal_id TEXT NOT NULL UNIQUE REFERENCES material_signal(signal_id),
+          envelope TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          emitted_at TEXT
+        )"""
+    )
+    # Signals created before the outbox existed were already appended to events.jsonl.
+    conn.execute(
+        "INSERT OR IGNORE INTO event_outbox (signal_id, envelope, created_at, emitted_at) "
+        "SELECT signal_id, '{}', created_at, created_at FROM material_signal"
+    )
+
+
 # Schema changes after the v0 baseline above. Each entry is (version, function); the function
 # runs inside one transaction together with the PRAGMA user_version bump. Never edit SCHEMA_SQL
 # or renumber an entry that has shipped: append a new migration instead.
@@ -164,6 +188,7 @@ MIGRATIONS = [
     (2, _migration_2_evidence_identity),
     (3, _migration_3_extraction_outcome),
     (4, _migration_4_candidate_matching),
+    (5, _migration_5_signal_week_and_outbox),
 ]
 
 
@@ -442,18 +467,42 @@ def _material_signal_row_to_dict(row):
 
 def insert_material_signal(conn, *, created_at, signal_type, topic_id, entity, summary, confidence_label,
                             materiality_label, materiality_score, materiality_reasons, evidence_ids,
-                            change_type, recommended_next_step):
+                            change_type, recommended_next_step, week=None):
     year = created_at[:4]
     signal_id = _next_sequence_id(conn, "material_signal", "signal_id", f"SIG-{year}-", 4)
     conn.execute(
         "INSERT INTO material_signal (signal_id, created_at, signal_type, topic_id, entity, summary, "
         "confidence_label, materiality_label, materiality_score, materiality_reasons, evidence_ids, "
-        "change_type, recommended_next_step) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "change_type, recommended_next_step, week) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (signal_id, created_at, signal_type, topic_id, json.dumps(entity, sort_keys=True), summary,
          confidence_label, materiality_label, materiality_score, json.dumps(materiality_reasons),
-         json.dumps(evidence_ids), change_type, recommended_next_step),
+         json.dumps(evidence_ids), change_type, recommended_next_step, week),
     )
     return signal_id
+
+
+def get_latest_material_signal_for_topic_week(conn, topic_id, week):
+    row = conn.execute(
+        "SELECT * FROM material_signal WHERE topic_id = ? AND week = ? ORDER BY signal_id DESC LIMIT 1",
+        (topic_id, week),
+    ).fetchone()
+    return _material_signal_row_to_dict(row) if row else None
+
+
+def enqueue_event(conn, signal_id, envelope):
+    conn.execute(
+        "INSERT INTO event_outbox (signal_id, envelope, created_at) VALUES (?, ?, ?)",
+        (signal_id, json.dumps(envelope), utc_now()),
+    )
+
+
+def get_pending_outbox(conn):
+    rows = conn.execute("SELECT * FROM event_outbox WHERE emitted_at IS NULL ORDER BY outbox_id").fetchall()
+    return [{**dict(r), "envelope": json.loads(r["envelope"])} for r in rows]
+
+
+def mark_outbox_emitted(conn, outbox_id):
+    conn.execute("UPDATE event_outbox SET emitted_at = ? WHERE outbox_id = ?", (utc_now(), outbox_id))
 
 
 def get_material_signal(conn, signal_id):
