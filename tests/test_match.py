@@ -1,8 +1,10 @@
 import json
+from datetime import date
 
 import pytest
 
 import db
+import ledger
 import match
 
 
@@ -259,3 +261,113 @@ def test_get_candidates_by_ids_keeps_the_given_order(tmp_path):
     a = seed_candidate(conn, "a")
     b = seed_candidate(conn, "b")
     assert [c["candidate_id"] for c in db.get_candidates_by_ids(conn, [b, a])] == [b, a]
+
+
+class SimulatedCrash(BaseException):
+    pass
+
+
+class RecordingMessages(FakeMessages):
+    def __init__(self, responses):
+        super().__init__(responses)
+        self.prompts = []
+
+    def create(self, **kwargs):
+        self.prompts.append(kwargs["messages"][0]["content"])
+        return super().create(**kwargs)
+
+
+def recording_client(responses):
+    client = FakeClient([])
+    client.messages = RecordingMessages(responses)
+    return client
+
+
+def test_run_stores_the_response_before_applying_and_marks_it_applied(tmp_path):
+    conn = seed_db(tmp_path)
+    seed_candidate(conn, "User wants CSV export")
+    conn.close()
+    response = json.dumps([{"index": 0, "matched_topic_id": None,
+                            "new_topic": {"name": "Export to CSV", "slug": "export-to-csv", "description": "d"}}])
+
+    match.run(db_path=str(tmp_path / "pi_agent.db"), today=date(2026, 8, 15), client=FakeClient([response]))
+
+    conn = db.connect(str(tmp_path / "pi_agent.db"))
+    [call] = [dict(r) for r in conn.execute("SELECT * FROM llm_call WHERE stage = 'match'")]
+    assert call["status"] == "succeeded" and call["applied_at"] is not None
+    assert json.loads(call["request_meta"])["week"] == "2026-W33"
+    row = conn.execute("SELECT match_call_id FROM signal_candidate").fetchone()
+    assert row["match_call_id"] == call["call_id"]
+
+
+def test_run_replays_stored_response_after_crash_without_calling_api(tmp_path, monkeypatch):
+    conn = seed_db(tmp_path)
+    seed_candidate(conn, "User wants CSV export")
+    conn.close()
+    db_path = str(tmp_path / "pi_agent.db")
+    response = json.dumps([{"index": 0, "matched_topic_id": None,
+                            "new_topic": {"name": "Export to CSV", "slug": "export-to-csv", "description": "d"}}])
+
+    real_apply = match.apply_resolutions
+
+    def crash(*args, **kwargs):
+        raise SimulatedCrash()
+
+    monkeypatch.setattr(match, "apply_resolutions", crash)
+    with pytest.raises(SimulatedCrash):
+        match.run(db_path=db_path, today=date(2026, 8, 15), client=FakeClient([response]))
+
+    monkeypatch.setattr(match, "apply_resolutions", real_apply)
+    match.run(db_path=db_path, today=date(2026, 8, 22), client=FakeClient([]))  # IndexError if it calls the API
+
+    conn = db.connect(db_path)
+    topic = db.get_canonical_topic_by_slug(conn, "export-to-csv")
+    assert topic["first_seen"] == "2026-W33"  # applied with the stored call's week, not the replay's
+    assert ledger.get_unapplied_calls(conn, "match") == []
+
+
+def test_retry_round_sends_only_the_candidates_that_failed(tmp_path):
+    conn = seed_db(tmp_path)
+    topic_id = seed_existing_topic(conn)
+    seed_candidate(conn, "dark mode again")
+    seed_candidate(conn, "unclear one")
+    conn.close()
+    first = json.dumps([{"index": 0, "matched_topic_id": topic_id}, {"index": 1, "matched_topic_id": "TOPIC-9999"}])
+    retry = json.dumps([{"index": 0, "matched_topic_id": topic_id}])
+    client = recording_client([first, retry])
+
+    match.run(db_path=str(tmp_path / "pi_agent.db"), today=date(2026, 8, 15), client=client)
+
+    assert len(client.messages.prompts) == 2
+    assert "dark mode again" not in client.messages.prompts[1]
+    assert "unclear one" in client.messages.prompts[1]
+    conn = db.connect(str(tmp_path / "pi_agent.db"))
+    assert db.get_candidates_without_topic(conn) == []
+
+
+def test_api_error_is_recorded_and_raised(tmp_path):
+    conn = seed_db(tmp_path)
+    seed_candidate(conn, "a")
+    conn.close()
+
+    with pytest.raises(match.MatchAPIError):
+        match.run(db_path=str(tmp_path / "pi_agent.db"), today=date(2026, 8, 15),
+                  client=FakeClient([RuntimeError("down")]))
+
+    conn = db.connect(str(tmp_path / "pi_agent.db"))
+    assert conn.execute("SELECT status FROM llm_call").fetchone()[0] == "api_error"
+    assert conn.execute("SELECT match_attempts FROM signal_candidate").fetchone()[0] == 0
+
+
+def test_response_error_counts_an_attempt_for_every_candidate_and_raises(tmp_path):
+    conn = seed_db(tmp_path)
+    seed_candidate(conn, "a")
+    seed_candidate(conn, "b")
+    conn.close()
+
+    with pytest.raises(match.MatchResponseError):
+        match.run(db_path=str(tmp_path / "pi_agent.db"), today=date(2026, 8, 15), client=FakeClient(["not json"]))
+
+    conn = db.connect(str(tmp_path / "pi_agent.db"))
+    assert [r[0] for r in conn.execute("SELECT match_attempts FROM signal_candidate")] == [1, 1]
+    assert conn.execute("SELECT raw_response FROM llm_call").fetchone()[0] == "not json"
