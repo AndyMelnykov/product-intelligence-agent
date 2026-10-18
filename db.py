@@ -180,6 +180,33 @@ def _migration_5_signal_week_and_outbox(conn):
     )
 
 
+def _migration_6_topic_versions(conn):
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS topic_version (
+          topic_id TEXT NOT NULL REFERENCES canonical_topic(topic_id),
+          version INTEGER NOT NULL,
+          name TEXT NOT NULL,
+          description TEXT,
+          aliases TEXT NOT NULL,
+          valid_from_week TEXT NOT NULL,
+          reason TEXT NOT NULL,
+          recorded_at TEXT NOT NULL,
+          PRIMARY KEY (topic_id, version)
+        )"""
+    )
+    _add_column(conn, "canonical_topic", "status TEXT NOT NULL DEFAULT 'active'")
+    _add_column(conn, "canonical_topic", "merged_into TEXT REFERENCES canonical_topic(topic_id)")
+    _add_column(conn, "signal_candidate", "original_topic_id TEXT REFERENCES canonical_topic(topic_id)")
+    conn.execute(
+        "UPDATE signal_candidate SET original_topic_id = topic_id WHERE topic_id IS NOT NULL AND original_topic_id IS NULL"
+    )
+    conn.execute(
+        "INSERT OR IGNORE INTO topic_version (topic_id, version, name, description, aliases, valid_from_week, reason, "
+        "recorded_at) SELECT topic_id, 1, name, description, aliases, first_seen, 'backfill', ? FROM canonical_topic",
+        (utc_now(),),
+    )
+
+
 # Schema changes after the v0 baseline above. Each entry is (version, function); the function
 # runs inside one transaction together with the PRAGMA user_version bump. Never edit SCHEMA_SQL
 # or renumber an entry that has shipped: append a new migration instead.
@@ -189,6 +216,7 @@ MIGRATIONS = [
     (3, _migration_3_extraction_outcome),
     (4, _migration_4_candidate_matching),
     (5, _migration_5_signal_week_and_outbox),
+    (6, _migration_6_topic_versions),
 ]
 
 
@@ -326,9 +354,9 @@ def insert_signal_candidate(conn, *, evidence_id, signal_type, summary, confiden
     candidate_id = _next_sequence_id(conn, "signal_candidate", "candidate_id", f"SC-{year}-", 5)
     conn.execute(
         "INSERT INTO signal_candidate (candidate_id, evidence_id, signal_type, topic_id, summary, "
-        "confidence, entity, effective_date, llm_call_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "confidence, entity, effective_date, llm_call_id, original_topic_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (candidate_id, evidence_id, signal_type, topic_id, summary, confidence,
-         json.dumps(entity, sort_keys=True) if entity is not None else None, effective_date, llm_call_id),
+         json.dumps(entity, sort_keys=True) if entity is not None else None, effective_date, llm_call_id, topic_id),
     )
     return candidate_id
 
@@ -375,9 +403,9 @@ def record_extraction_failure(conn, evidence_id, call_id, *, count_attempt, max_
 
 def set_candidate_topic(conn, candidate_id, topic_id, match_call_id=None):
     conn.execute(
-        "UPDATE signal_candidate SET topic_id = ?, match_call_id = COALESCE(?, match_call_id), match_error = NULL "
-        "WHERE candidate_id = ?",
-        (topic_id, match_call_id, candidate_id),
+        "UPDATE signal_candidate SET topic_id = ?, original_topic_id = COALESCE(original_topic_id, ?), "
+        "match_call_id = COALESCE(?, match_call_id), match_error = NULL WHERE candidate_id = ?",
+        (topic_id, topic_id, match_call_id, candidate_id),
     )
 
 
@@ -404,8 +432,9 @@ def get_candidates_by_ids(conn, candidate_ids):
     return [_signal_candidate_row_to_dict(rows[i]) for i in candidate_ids if i in rows]
 
 
-def get_canonical_topics(conn):
-    rows = conn.execute("SELECT * FROM canonical_topic ORDER BY topic_id").fetchall()
+def get_canonical_topics(conn, include_merged=False):
+    where = "" if include_merged else " WHERE status = 'active'"
+    rows = conn.execute(f"SELECT * FROM canonical_topic{where} ORDER BY topic_id").fetchall()
     return [_topic_row_to_dict(r) for r in rows]
 
 
@@ -414,7 +443,7 @@ def get_canonical_topic_by_slug(conn, slug):
     return _topic_row_to_dict(row) if row else None
 
 
-def insert_canonical_topic(conn, *, slug, name, description, aliases, first_seen, last_seen):
+def insert_canonical_topic(conn, *, slug, name, description, aliases, first_seen, last_seen, valid_from_week=None):
     topic_id = _next_sequence_id(conn, "canonical_topic", "topic_id", "TOPIC-", 4)
     try:
         conn.execute(
@@ -424,7 +453,51 @@ def insert_canonical_topic(conn, *, slug, name, description, aliases, first_seen
         )
     except sqlite3.IntegrityError as e:
         raise DBError(f"cannot create canonical_topic with slug {slug!r}: {e}") from e
+    _insert_topic_version(conn, topic_id, 1, name, description, aliases, valid_from_week or first_seen, "created")
     return topic_id
+
+
+def _insert_topic_version(conn, topic_id, version, name, description, aliases, valid_from_week, reason):
+    conn.execute(
+        "INSERT INTO topic_version (topic_id, version, name, description, aliases, valid_from_week, reason, recorded_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (topic_id, version, name, description, json.dumps(aliases), valid_from_week, reason, utc_now()),
+    )
+
+
+def update_topic_definition(conn, topic_id, *, week, reason, name=None, description=None, aliases=None):
+    current = conn.execute("SELECT * FROM canonical_topic WHERE topic_id = ?", (topic_id,)).fetchone()
+    if current is None:
+        raise DBError(f"no topic {topic_id}")
+    new_name = name if name is not None else current["name"]
+    new_description = description if description is not None else current["description"]
+    new_aliases = aliases if aliases is not None else json.loads(current["aliases"])
+    conn.execute(
+        "UPDATE canonical_topic SET name = ?, description = ?, aliases = ? WHERE topic_id = ?",
+        (new_name, new_description, json.dumps(new_aliases), topic_id),
+    )
+    version = conn.execute("SELECT MAX(version) FROM topic_version WHERE topic_id = ?", (topic_id,)).fetchone()[0] + 1
+    _insert_topic_version(conn, topic_id, version, new_name, new_description, new_aliases, week, reason)
+    return version
+
+
+def _topic_version_row_to_dict(row):
+    d = dict(row)
+    d["aliases"] = json.loads(d["aliases"])
+    return d
+
+
+def get_topic_versions(conn, topic_id):
+    rows = conn.execute("SELECT * FROM topic_version WHERE topic_id = ? ORDER BY version", (topic_id,)).fetchall()
+    return [_topic_version_row_to_dict(r) for r in rows]
+
+
+def get_topic_version_as_of(conn, topic_id, week):
+    row = conn.execute(
+        "SELECT * FROM topic_version WHERE topic_id = ? AND valid_from_week <= ? ORDER BY version DESC LIMIT 1",
+        (topic_id, week),
+    ).fetchone()
+    return _topic_version_row_to_dict(row) if row else None
 
 
 def update_topic_last_seen(conn, topic_id, last_seen):
