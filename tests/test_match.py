@@ -371,3 +371,34 @@ def test_response_error_counts_an_attempt_for_every_candidate_and_raises(tmp_pat
     conn = db.connect(str(tmp_path / "pi_agent.db"))
     assert [r[0] for r in conn.execute("SELECT match_attempts FROM signal_candidate")] == [1, 1]
     assert conn.execute("SELECT raw_response FROM llm_call").fetchone()[0] == "not json"
+
+
+def test_late_match_attributes_mentions_to_the_evidence_week(tmp_path):
+    conn = seed_db(tmp_path)
+    seed_candidate(conn, "User wants CSV export")  # captured 2026-08-15 = 2026-W33
+    conn.close()
+    response = json.dumps([{"index": 0, "matched_topic_id": None,
+                            "new_topic": {"name": "Export to CSV", "slug": "export-to-csv", "description": "d"}}])
+
+    match.run(db_path=str(tmp_path / "pi_agent.db"), today=date(2026, 8, 29), client=FakeClient([response]))  # W35
+
+    conn = db.connect(str(tmp_path / "pi_agent.db"))
+    topic = db.get_canonical_topic_by_slug(conn, "export-to-csv")
+    assert (topic["first_seen"], topic["last_seen"]) == ("2026-W33", "2026-W33")
+    assert db.get_topic_weekly_mentions(conn, topic["topic_id"]) == {"2026-W33": 1}
+
+
+def test_matching_older_evidence_widens_first_seen_but_never_narrows_last_seen(tmp_path):
+    conn = seed_db(tmp_path)
+    topic_id = seed_existing_topic(conn)  # first_seen W30, last_seen W31
+    evidence_id = db.insert_evidence(conn, source_type="reddit_post", source_name="s", source_url="/old",
+                                     captured_at="2026-07-06T00:00:00+00:00", published_at="2026-07-06T00:00:00+00:00",
+                                     title="t", content="c", metadata={})  # 2026-W28
+    db.insert_signal_candidate(conn, evidence_id=evidence_id, signal_type="new_feature_demand", summary="s", confidence=0.9)
+    conn.commit()
+    candidates = db.get_candidates_without_topic(conn)
+
+    match.apply_matches(conn, candidates, [{"index": 0, "matched_topic_id": topic_id}], week="2026-W35")
+
+    topic = db.get_canonical_topic_by_slug(conn, "dark-mode-support")
+    assert (topic["first_seen"], topic["last_seen"]) == ("2026-W28", "2026-W31")

@@ -167,10 +167,18 @@ class ApplyOutcome:
     invalid: list = field(default_factory=list)
 
 
+def candidate_week(candidate, fallback):
+    """ISO week the candidate's evidence was captured in; mentions and first/last seen use it."""
+    captured_at = candidate.get("captured_at")
+    return iso_week_string(date.fromisoformat(captured_at[:10])) if captured_at else fallback
+
+
 def apply_resolutions(conn, candidates, resolutions, week, match_call_id=None):
-    """Write resolutions to the database. Does not commit. Invalid ones only count an attempt."""
+    """Write resolutions to the database. Does not commit. Invalid ones only count an attempt.
+    `week` is used only for candidates that carry no captured_at."""
     outcome = ApplyOutcome()
     created_by_slug = {}
+    touched = set()
     for candidate, resolution in zip(candidates, resolutions):
         candidate_id = candidate["candidate_id"]
         if resolution.action == "invalid":
@@ -178,9 +186,9 @@ def apply_resolutions(conn, candidates, resolutions, week, match_call_id=None):
             outcome.invalid.append((candidate_id, resolution.reason))
             continue
 
+        seen_week = candidate_week(candidate, week)
         if resolution.action == "match":
             topic_id = resolution.topic_id
-            db.update_topic_last_seen(conn, topic_id, week)
             outcome.matched += 1
         else:
             slug = resolution.new_topic["slug"]
@@ -190,20 +198,22 @@ def apply_resolutions(conn, candidates, resolutions, week, match_call_id=None):
             else:
                 existing = db.get_canonical_topic_by_slug(conn, slug)
                 if existing is not None:
-                    topic_id = existing["topic_id"]
-                    db.update_topic_last_seen(conn, topic_id, week)
+                    topic_id = db.resolve_topic_id(conn, existing["topic_id"])
                     outcome.matched += 1
                 else:
                     topic_id = db.insert_canonical_topic(
                         conn, slug=slug, name=resolution.new_topic["name"],
                         description=resolution.new_topic["description"], aliases=[],
-                        first_seen=week, last_seen=week,
+                        first_seen=seen_week, last_seen=seen_week,
                     )
                     outcome.created.append(topic_id)
                 created_by_slug[slug] = topic_id
 
+        db.extend_topic_seen(conn, topic_id, seen_week)
         db.set_candidate_topic(conn, candidate_id, topic_id, match_call_id=match_call_id)
-        db.increment_topic_weekly_mentions(conn, topic_id, week, amount=1)
+        touched.add(topic_id)
+
+    db.refresh_topic_weekly_mentions(conn, touched)
     return outcome
 
 
