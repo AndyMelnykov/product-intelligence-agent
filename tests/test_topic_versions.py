@@ -101,3 +101,38 @@ def test_migration_backfills_versions_and_original_topics(tmp_path):
     assert (v1["valid_from_week"], v1["reason"]) == ("2026-W30", "backfill")
     assert conn.execute("SELECT original_topic_id FROM signal_candidate").fetchone()[0] == "TOPIC-0001"
     assert db.get_canonical_topic_by_slug(conn, "dark-mode")["status"] == "active"
+
+
+def test_derived_mentions_count_non_duplicate_candidates_by_captured_week(conn):
+    topic_id = _topic(conn)
+    _candidate(conn, topic_id, "2026-08-10T00:00:00+00:00")  # W33
+    _candidate(conn, topic_id, "2026-08-15T00:00:00+00:00")  # W33
+    dup = _candidate(conn, topic_id, "2026-08-20T00:00:00+00:00")  # W34, then marked duplicate
+    evidence_id = conn.execute("SELECT evidence_id FROM signal_candidate WHERE candidate_id = ?", (dup,)).fetchone()[0]
+    conn.execute("UPDATE evidence SET duplicate_of = 'EV-2026-000001' WHERE evidence_id = ?", (evidence_id,))
+
+    assert db.derived_topic_weekly_mentions(conn, topic_id) == {"2026-W33": 2}
+
+
+def test_refresh_replaces_cached_counts(conn):
+    topic_id = _topic(conn)
+    db.increment_topic_weekly_mentions(conn, topic_id, "2026-W30", amount=5)
+    _candidate(conn, topic_id, "2026-08-15T00:00:00+00:00")
+
+    db.refresh_topic_weekly_mentions(conn, [topic_id])
+
+    assert db.get_topic_weekly_mentions(conn, topic_id) == {"2026-W33": 1}
+
+
+def test_rebuild_all_reports_only_changed_topics(conn):
+    changed = _topic(conn, "changed")
+    same = _topic(conn, "same")
+    db.increment_topic_weekly_mentions(conn, changed, "2026-W30", amount=2)
+    _candidate(conn, changed, "2026-08-15T00:00:00+00:00")
+    _candidate(conn, same, "2026-08-15T00:00:00+00:00")
+    db.refresh_topic_weekly_mentions(conn, [same])
+
+    diffs = db.rebuild_all_topic_weekly_mentions(conn)
+
+    assert diffs == {changed: ({"2026-W30": 2}, {"2026-W33": 1})}
+    assert db.get_topic_weekly_mentions(conn, changed) == {"2026-W33": 1}

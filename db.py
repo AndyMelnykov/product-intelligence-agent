@@ -1,6 +1,7 @@
 import json
 import sqlite3
-from datetime import datetime, timezone
+from collections import Counter
+from datetime import date, datetime, timezone
 
 from weekutil import iso_week_string
 
@@ -416,19 +417,23 @@ def record_match_failure(conn, candidate_id, reason):
     )
 
 
+_CANDIDATE_WITH_WEEK = "SELECT sc.*, e.captured_at FROM signal_candidate sc JOIN evidence e ON e.evidence_id = sc.evidence_id"
+
+
 def get_candidates_without_topic(conn, max_attempts=None):
-    sql, params = "SELECT * FROM signal_candidate WHERE topic_id IS NULL", ()
+    sql, params = _CANDIDATE_WITH_WEEK + " WHERE sc.topic_id IS NULL", ()
     if max_attempts is not None:
-        sql, params = sql + " AND match_attempts < ?", (max_attempts,)
-    rows = conn.execute(sql + " ORDER BY candidate_id", params).fetchall()
+        sql, params = sql + " AND sc.match_attempts < ?", (max_attempts,)
+    rows = conn.execute(sql + " ORDER BY sc.candidate_id", params).fetchall()
     return [_signal_candidate_row_to_dict(r) for r in rows]
 
 
 def get_candidates_by_ids(conn, candidate_ids):
+    if not candidate_ids:
+        return []
     rows = {r["candidate_id"]: r for r in conn.execute(
-        f"SELECT * FROM signal_candidate WHERE candidate_id IN ({','.join('?' * len(candidate_ids))})",
-        tuple(candidate_ids),
-    )} if candidate_ids else {}
+        _CANDIDATE_WITH_WEEK + f" WHERE sc.candidate_id IN ({','.join('?' * len(candidate_ids))})", tuple(candidate_ids),
+    )}
     return [_signal_candidate_row_to_dict(rows[i]) for i in candidate_ids if i in rows]
 
 
@@ -519,6 +524,61 @@ def get_topic_weekly_mentions(conn, topic_id):
     return {row["period"]: row["mentions"] for row in rows}
 
 
+def _week_of_timestamp(iso_timestamp):
+    return iso_week_string(date.fromisoformat(iso_timestamp[:10]))
+
+
+def derived_topic_weekly_mentions(conn, topic_id):
+    rows = conn.execute(
+        "SELECT e.captured_at FROM signal_candidate sc JOIN evidence e ON e.evidence_id = sc.evidence_id "
+        "WHERE sc.topic_id = ? AND e.duplicate_of IS NULL",
+        (topic_id,),
+    ).fetchall()
+    return dict(Counter(_week_of_timestamp(r["captured_at"]) for r in rows))
+
+
+def refresh_topic_weekly_mentions(conn, topic_ids):
+    """Rebuild the cached weekly counts of these topics from their non-duplicate candidates."""
+    for topic_id in sorted(set(topic_ids)):
+        conn.execute("DELETE FROM topic_weekly_mentions WHERE topic_id = ?", (topic_id,))
+        for period, mentions in derived_topic_weekly_mentions(conn, topic_id).items():
+            conn.execute(
+                "INSERT INTO topic_weekly_mentions (topic_id, period, mentions) VALUES (?, ?, ?)",
+                (topic_id, period, mentions),
+            )
+
+
+def rebuild_all_topic_weekly_mentions(conn):
+    """Refresh every topic's cache. Returns {topic_id: (before, after)} for topics whose counts changed."""
+    diffs = {}
+    for topic in get_canonical_topics(conn, include_merged=True):
+        before = get_topic_weekly_mentions(conn, topic["topic_id"])
+        after = derived_topic_weekly_mentions(conn, topic["topic_id"])
+        if before != after:
+            diffs[topic["topic_id"]] = (before, after)
+            refresh_topic_weekly_mentions(conn, [topic["topic_id"]])
+    return diffs
+
+
+def extend_topic_seen(conn, topic_id, week):
+    conn.execute(
+        "UPDATE canonical_topic SET first_seen = MIN(first_seen, ?), last_seen = MAX(last_seen, ?) WHERE topic_id = ?",
+        (week, week, topic_id),
+    )
+
+
+def resolve_topic_id(conn, topic_id):
+    """Follow merged_into links to the active topic a (possibly merged) topic now lives in."""
+    seen = set()
+    while topic_id not in seen:
+        seen.add(topic_id)
+        row = conn.execute("SELECT status, merged_into FROM canonical_topic WHERE topic_id = ?", (topic_id,)).fetchone()
+        if row is None or row["status"] != "merged" or not row["merged_into"]:
+            return topic_id
+        topic_id = row["merged_into"]
+    raise DBError(f"merge cycle involving {topic_id}")
+
+
 def search_evidence_and_candidates(conn, keyword):
     like = f"%{keyword}%"
     rows = conn.execute(
@@ -587,7 +647,7 @@ def get_candidates_for_topic(conn, topic_id):
     rows = conn.execute(
         "SELECT sc.candidate_id, sc.evidence_id, sc.signal_type, sc.summary, sc.confidence, e.captured_at "
         "FROM signal_candidate sc JOIN evidence e ON e.evidence_id = sc.evidence_id "
-        "WHERE sc.topic_id = ? ORDER BY sc.candidate_id",
+        "WHERE sc.topic_id = ? AND e.duplicate_of IS NULL ORDER BY sc.candidate_id",
         (topic_id,),
     ).fetchall()
     return [dict(r) for r in rows]
