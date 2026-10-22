@@ -419,3 +419,18 @@ def test_new_topic_with_a_merged_slug_lands_on_the_survivor(tmp_path):
     match.apply_matches(conn, candidates, [decision], week="2026-W33")
 
     assert conn.execute("SELECT topic_id FROM signal_candidate").fetchone()[0] == keep
+
+
+def test_match_call_records_the_registry_fingerprint(tmp_path):
+    conn = seed_db(tmp_path)
+    topic_id = seed_existing_topic(conn)
+    seed_candidate(conn, "dark mode again")
+    expected = registry.registry_fingerprint(db.get_canonical_topics(conn))
+    conn.close()
+
+    match.run(db_path=str(tmp_path / "pi_agent.db"), today=date(2026, 8, 15),
+              client=FakeClient([json.dumps([{"index": 0, "matched_topic_id": topic_id}])]))
+
+    conn = db.connect(str(tmp_path / "pi_agent.db"))
+    meta = json.loads(conn.execute("SELECT request_meta FROM llm_call WHERE stage = 'match'").fetchone()[0])
+    assert meta["registry_fingerprint"] == expected

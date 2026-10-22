@@ -7,6 +7,7 @@ import anthropic
 
 import db
 import ledger
+import registry
 from credentials import get_secret
 from llm import reply_from_response
 from weekutil import iso_week_string
@@ -240,6 +241,7 @@ def match_batch(conn, client, candidates, week):
             "week": week,
             "candidate_ids": [c["candidate_id"] for c in candidates],
             "topic_ids": [t["topic_id"] for t in existing],
+            "registry_fingerprint": registry.registry_fingerprint(existing),
         },
     )
     try:
