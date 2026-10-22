@@ -1,7 +1,10 @@
+import json
+
 import pytest
 
 import db
 import registry
+from fingerprints import fingerprint
 
 
 @pytest.fixture
@@ -98,3 +101,87 @@ def test_split_rejects_candidates_from_another_topic_or_moving_everything(conn):
     with pytest.raises(registry.RegistryError, match="every candidate"):
         registry.split_topic(conn, "exports", new_name="X", new_slug="x", new_description="d",
                              candidate_ids=[only], week="2026-W40", reason="r", decided_by="h")
+
+
+def test_registry_as_of_shows_topics_and_definitions_as_they_were(conn):
+    keep = topic(conn, "dark-mode", "Dark mode", first_seen="2026-W30")
+    topic(conn, "night-theme", "Night theme", first_seen="2026-W31")
+    source = topic(conn, "exports", "Exports", first_seen="2026-W30")
+    first = candidate(conn, source)
+    candidate(conn, source)
+    registry.merge_topics(conn, "night-theme", "dark-mode", week="2026-W36", reason="r", decided_by="h")
+    registry.split_topic(conn, "exports", new_name="CSV", new_slug="csv", new_description="d",
+                         candidate_ids=[first], week="2026-W37", reason="r", decided_by="h")
+
+    before = registry.registry_as_of(conn, "2026-W35")
+    after = registry.registry_as_of(conn, "2026-W37")
+
+    assert [t["slug"] for t in before] == ["dark-mode", "night-theme", "exports"]
+    assert next(t for t in before if t["topic_id"] == keep)["aliases"] == []
+    assert [t["slug"] for t in after] == ["dark-mode", "exports", "csv"]
+    assert next(t for t in after if t["topic_id"] == keep)["aliases"] == ["Night theme"]
+
+
+def test_registry_fingerprint_ignores_order_and_tracks_definitions():
+    a = [{"topic_id": "T1", "name": "A", "description": "d", "aliases": []},
+         {"topic_id": "T2", "name": "B", "description": "d", "aliases": []}]
+    assert registry.registry_fingerprint(a) == registry.registry_fingerprint(list(reversed(a)))
+    changed = [dict(a[0], description="other"), a[1]]
+    assert registry.registry_fingerprint(a) != registry.registry_fingerprint(changed)
+    assert registry.registry_fingerprint([]) == fingerprint([])
+
+
+def test_topic_history_collects_versions_lineage_and_mentions(conn):
+    topic(conn, "dark-mode", "Dark mode")
+    topic(conn, "night-theme", "Night theme")
+    registry.merge_topics(conn, "night-theme", "dark-mode", week="2026-W36", reason="r", decided_by="h")
+
+    history = registry.topic_history(conn, "dark-mode")
+
+    assert [v["version"] for v in history["versions"]] == [1, 2]
+    assert history["lineage"][0]["kind"] == "merge"
+    assert history["weekly_mentions"] == {}
+
+
+def test_cli_merge_commits_and_history_prints_json(tmp_path, capsys):
+    path = str(tmp_path / "pi.db")
+    c = db.connect(path)
+    db.init_db(c)
+    topic(c, "dark-mode", "Dark mode")
+    topic(c, "night-theme", "Night theme")
+    c.commit()
+    c.close()
+
+    assert registry.main(["--db-path", path, "merge", "night-theme", "dark-mode", "--reason", "same"]) == 0
+    capsys.readouterr()
+    assert registry.main(["--db-path", path, "history", "dark-mode"]) == 0
+
+    output = json.loads(capsys.readouterr().out)
+    assert output["topic"]["aliases"] == ["Night theme"]
+    assert output["lineage"][0]["decided_by"] == "human:cli"
+
+
+def test_cli_reports_registry_errors_with_exit_code_2(tmp_path, capsys):
+    path = str(tmp_path / "pi.db")
+    assert registry.main(["--db-path", path, "merge", "a", "b", "--reason", "r"]) == 2
+    assert "no topic" in capsys.readouterr().err
+
+
+def test_cli_rebuild_mentions_is_a_dry_run_unless_apply(tmp_path, capsys):
+    path = str(tmp_path / "pi.db")
+    c = db.connect(path)
+    db.init_db(c)
+    topic_id = topic(c, "dark-mode", "Dark mode")
+    db.increment_topic_weekly_mentions(c, topic_id, "2026-W30", amount=3)
+    c.commit()
+    c.close()
+
+    registry.main(["--db-path", path, "rebuild-mentions"])
+    assert "would change 1 topic" in capsys.readouterr().out
+    c = db.connect(path)
+    assert db.get_topic_weekly_mentions(c, topic_id) == {"2026-W30": 3}
+    c.close()
+
+    registry.main(["--db-path", path, "rebuild-mentions", "--apply"])
+    c = db.connect(path)
+    assert db.get_topic_weekly_mentions(c, topic_id) == {}
