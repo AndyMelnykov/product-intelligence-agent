@@ -208,6 +208,22 @@ def _migration_6_topic_versions(conn):
     )
 
 
+def _migration_7_topic_lineage(conn):
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS topic_lineage (
+          lineage_id INTEGER PRIMARY KEY AUTOINCREMENT,
+          kind TEXT NOT NULL,
+          from_topic_id TEXT NOT NULL REFERENCES canonical_topic(topic_id),
+          to_topic_id TEXT NOT NULL REFERENCES canonical_topic(topic_id),
+          week TEXT NOT NULL,
+          reason TEXT NOT NULL,
+          decided_by TEXT NOT NULL,
+          candidate_ids TEXT NOT NULL,
+          created_at TEXT NOT NULL
+        )"""
+    )
+
+
 # Schema changes after the v0 baseline above. Each entry is (version, function); the function
 # runs inside one transaction together with the PRAGMA user_version bump. Never edit SCHEMA_SQL
 # or renumber an entry that has shipped: append a new migration instead.
@@ -218,6 +234,7 @@ MIGRATIONS = [
     (4, _migration_4_candidate_matching),
     (5, _migration_5_signal_week_and_outbox),
     (6, _migration_6_topic_versions),
+    (7, _migration_7_topic_lineage),
 ]
 
 
@@ -691,3 +708,39 @@ def llm_usage(conn, *, since=None):
         sql, params = sql + " WHERE started_at >= ?", (since,)
     rows = conn.execute(sql + " GROUP BY stage, model ORDER BY stage, model", params).fetchall()
     return [dict(r) for r in rows]
+
+
+def insert_topic_lineage(conn, *, kind, from_topic_id, to_topic_id, week, reason, decided_by, candidate_ids):
+    cursor = conn.execute(
+        "INSERT INTO topic_lineage (kind, from_topic_id, to_topic_id, week, reason, decided_by, candidate_ids, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (kind, from_topic_id, to_topic_id, week, reason, decided_by, json.dumps(candidate_ids), utc_now()),
+    )
+    return cursor.lastrowid
+
+
+def get_lineage_for_topic(conn, topic_id):
+    rows = conn.execute(
+        "SELECT * FROM topic_lineage WHERE from_topic_id = ? OR to_topic_id = ? ORDER BY lineage_id", (topic_id, topic_id)
+    ).fetchall()
+    return [{**dict(r), "candidate_ids": json.loads(r["candidate_ids"])} for r in rows]
+
+
+def set_topic_status(conn, topic_id, status, merged_into=None):
+    conn.execute("UPDATE canonical_topic SET status = ?, merged_into = ? WHERE topic_id = ?", (status, merged_into, topic_id))
+
+
+def move_candidates(conn, from_topic_id, to_topic_id, candidate_ids=None):
+    """Re-point candidates (all of from_topic_id's, or just candidate_ids). original_topic_id is kept."""
+    if candidate_ids is None:
+        candidate_ids = [r[0] for r in conn.execute(
+            "SELECT candidate_id FROM signal_candidate WHERE topic_id = ? ORDER BY candidate_id", (from_topic_id,))]
+    for candidate_id in candidate_ids:
+        conn.execute("UPDATE signal_candidate SET topic_id = ? WHERE candidate_id = ? AND topic_id = ?",
+                     (to_topic_id, candidate_id, from_topic_id))
+    return list(candidate_ids)
+
+
+def get_merge_redirects(conn):
+    rows = conn.execute("SELECT topic_id FROM canonical_topic WHERE status = 'merged'").fetchall()
+    return {r["topic_id"]: resolve_topic_id(conn, r["topic_id"]) for r in rows}

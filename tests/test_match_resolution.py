@@ -66,3 +66,18 @@ def test_new_topic_slug_falls_back_to_name():
 def test_non_list_or_garbage_output_never_raises(decisions):
     resolutions = match.resolve_decisions(CANDS, decisions, TOPICS)
     assert [r.action for r in resolutions] == ["invalid"] * 3
+
+
+def test_resolve_redirects_merged_topic_ids():
+    [r] = match.resolve_decisions(CANDS[:1], [{"index": 0, "matched_topic_id": "TOPIC-0007"}], TOPICS,
+                                  redirects={"TOPIC-0007": "TOPIC-0001"})
+    assert (r.action, r.topic_id) == ("match", "TOPIC-0001")
+    assert "merged" in r.reason
+
+
+def test_matching_prompt_lists_aliases_only_when_present():
+    with_alias = [{"topic_id": "TOPIC-0001", "name": "Dark mode", "description": "d", "aliases": ["Night theme"]}]
+    without = [{"topic_id": "TOPIC-0001", "name": "Dark mode", "description": "d", "aliases": []}]
+    cands = [{"signal_type": "new_feature_demand", "summary": "s"}]
+    assert "Night theme" in match.build_matching_prompt(cands, with_alias)
+    assert '"aliases"' not in match.build_matching_prompt(cands, without)
