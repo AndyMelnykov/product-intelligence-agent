@@ -52,7 +52,8 @@ class MatchResponseError(MatchError):
 
 def build_matching_prompt(candidates, existing_topics):
     existing_summary = [
-        {"topic_id": t["topic_id"], "name": t["name"], "description": t["description"]}
+        {"topic_id": t["topic_id"], "name": t["name"], "description": t["description"],
+         **({"aliases": t["aliases"]} if t.get("aliases") else {})}
         for t in existing_topics
     ]
     candidate_summary = [
@@ -110,9 +111,11 @@ class Resolution:
     reason: str | None = None
 
 
-def resolve_decisions(candidates, decisions, existing_topics):
+def resolve_decisions(candidates, decisions, existing_topics, redirects=None):
     """Turn raw matcher output into one Resolution per candidate. Pure and total: it never raises,
-    whatever `decisions` contains, so no model output can crash the stage."""
+    whatever `decisions` contains, so no model output can crash the stage.
+    `redirects` maps merged topic ids to the active topic they live in now."""
+    redirects = redirects or {}
     known_ids = {t["topic_id"] for t in existing_topics}
     id_by_slug = {t["slug"]: t["topic_id"] for t in existing_topics if t.get("slug")}
 
@@ -133,16 +136,19 @@ def resolve_decisions(candidates, decisions, existing_topics):
         if len(got) != 1:
             resolutions.append(Resolution(i, "invalid", reason="no decision" if not got else f"{len(got)} decisions"))
         else:
-            resolutions.append(_resolve_one(i, got[0], known_ids, id_by_slug))
+            resolutions.append(_resolve_one(i, got[0], known_ids, id_by_slug, redirects))
     return resolutions
 
 
-def _resolve_one(index, decision, known_ids, id_by_slug):
+def _resolve_one(index, decision, known_ids, id_by_slug, redirects):
     topic_id = decision.get("matched_topic_id")
     new_topic = decision.get("new_topic")
     if topic_id:
         if new_topic:
             return Resolution(index, "invalid", reason="both matched_topic_id and new_topic are set")
+        if isinstance(topic_id, str) and redirects.get(topic_id) in known_ids:
+            return Resolution(index, "match", topic_id=redirects[topic_id],
+                              reason=f"redirected from merged topic {topic_id}")
         if not isinstance(topic_id, str) or topic_id not in known_ids:
             return Resolution(index, "invalid", reason=f"unknown topic id {topic_id!r}")
         return Resolution(index, "match", topic_id=topic_id)
@@ -219,7 +225,8 @@ def apply_resolutions(conn, candidates, resolutions, week, match_call_id=None):
 
 def apply_matches(conn, candidates, decisions, week):
     existing = db.get_canonical_topics(conn)
-    return apply_resolutions(conn, candidates, resolve_decisions(candidates, decisions, existing), week)
+    return apply_resolutions(conn, candidates,
+                             resolve_decisions(candidates, decisions, existing, db.get_merge_redirects(conn)), week)
 
 
 def match_batch(conn, client, candidates, week):
@@ -256,7 +263,7 @@ def match_batch(conn, client, candidates, week):
 
 
 def _apply_call(conn, call_id, candidates, decisions, week, existing):
-    resolutions = resolve_decisions(candidates, decisions, existing)
+    resolutions = resolve_decisions(candidates, decisions, existing, db.get_merge_redirects(conn))
     outcome = apply_resolutions(conn, candidates, resolutions, week, match_call_id=call_id)
     ledger.mark_applied(conn, call_id)
     conn.commit()

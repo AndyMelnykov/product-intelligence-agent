@@ -6,6 +6,7 @@ import pytest
 import db
 import ledger
 import match
+import registry
 
 
 class FakeContentBlock:
@@ -402,3 +403,19 @@ def test_matching_older_evidence_widens_first_seen_but_never_narrows_last_seen(t
 
     topic = db.get_canonical_topic_by_slug(conn, "dark-mode-support")
     assert (topic["first_seen"], topic["last_seen"]) == ("2026-W28", "2026-W31")
+
+
+def test_new_topic_with_a_merged_slug_lands_on_the_survivor(tmp_path):
+    conn = seed_db(tmp_path)
+    keep = seed_existing_topic(conn)  # dark-mode-support
+    db.insert_canonical_topic(conn, slug="night-theme", name="Night theme", description="d",
+                              aliases=[], first_seen="2026-W30", last_seen="2026-W30")
+    registry.merge_topics(conn, "night-theme", "dark-mode-support", week="2026-W32", reason="r", decided_by="h")
+    seed_candidate(conn, "night theme please")
+    candidates = db.get_candidates_without_topic(conn)
+    decision = {"index": 0, "matched_topic_id": None,
+                "new_topic": {"name": "Night theme", "slug": "night-theme", "description": "d"}}
+
+    match.apply_matches(conn, candidates, [decision], week="2026-W33")
+
+    assert conn.execute("SELECT topic_id FROM signal_candidate").fetchone()[0] == keep
