@@ -245,6 +245,8 @@ def _parse_extraction_example(file_path, position, raw):
 
 def _load_matching_file(file_path, data):
     name = _require_str(file_path, None, data, "name")
+    if data.get("draft"):
+        _fail(file_path, name, "draft scenario: review every expected decision, then delete 'draft: true'")
 
     topics = data.get("existing_topics")
     if not isinstance(topics, list):
