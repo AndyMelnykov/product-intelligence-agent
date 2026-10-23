@@ -117,13 +117,14 @@ run_weekly.py
   source text names one (currently unused downstream — Reddit posts rarely name one, and
   no source that would need it, like competitor changelogs, exists yet).
 - **match.py** — matches new candidates against the `canonical_topic` registry (or
-  creates a new topic), incrementing per-week mention counts.
+  creates a new topic), then recomputing per-week mention counts from the evidence.
 - **report.py** — computes top topics by mention count and week-over-week trend
   (new / rising / stable / falling) from the database, same output format as before.
 - **materiality.py** — classifies each topic's this-week materiality (low / medium /
   high / critical) from its trend, volume, confidence, and signal type; `high`/`critical`
   topics get a `material_signal` row and a `product_intelligence.signal.material` event
   appended to `data/events.jsonl`.
+- **registry.py** — merge, split, history and as-of snapshots of the canonical topic registry (human operations).
 - **ledger.py** — records every model call before and after it is made.
 - **llm.py** — reads model responses the same way everywhere.
 
@@ -203,8 +204,10 @@ still worth stating explicitly:
 
 - every `material_signal` this pipeline emits — `recommended_next_step` is always
   `strategic_assessment` or `urgent_strategic_assessment`, never an automated action
-- newly created canonical topics — the main failure mode here is the matching LLM call
-  splitting one real topic into two, or merging two distinct ones (see Limitations)
+- newly created canonical topics. Fix a split or merge with `python registry.py merge FROM INTO --reason ...` or
+  `python registry.py split SLUG --new-name ... --candidates ...`; history is kept (`python registry.py history SLUG`).
+  The main failure mode here is the matching LLM call splitting one real topic into two, or merging two distinct
+  ones (see Limitations)
 
 **Requires approval:** none exist in this pipeline today — there's no operation here
 that writes externally or is hard to reverse.
@@ -286,6 +289,7 @@ pytest -v
 ## Limitations
 
 - **One process at a time.** Crash recovery assumes no other pipeline process is running against the same database.
+- **Reports use the latest registry.** After a merge, past weeks are reported under the surviving topic. Use `registry.py snapshot --week W` for the registry as it was.
 - **Extraction/matching quality is unmeasured.** No evaluation harness scores
   signal-type accuracy, false-merge rate, or materiality precision against labeled
   examples — see [Evaluation](#evaluation).
@@ -382,6 +386,8 @@ python evals/run_matching_eval.py   [--filter connection_pooling_duplicate] [--m
 - The matching eval checks each candidate's decision: it must match the named existing topic, or create a complete new topic when the golden file says `matched_topic_id: null`.
 - Results are classified as `passed`, `failed` (a model mistake, including unusable output), or `errored` (the API call failed, so the example is excluded from accuracy). The exit code is 0 whenever a report is printed. It is 2 for malformed golden YAML, a `--filter` that matches nothing, or missing credentials.
 - Golden data lives in `evals/golden/extraction/<product_area>.yaml` (many examples per file) and `evals/golden/matching/<scenario>.yaml` (one scenario per file). See the design spec at `docs/superpowers/specs/2026-09-24-extraction-matching-evals-design.md` for the format. `tests/test_evals_golden.py` validates the committed golden files in CI.
+
+**Scenarios from production.** `python evals/export_matching_scenario.py --week 2026-W40` drafts a matching scenario from one real week: the registry as it stood the week before, plus that week's candidates and where production put them. Drafts carry `draft: true`, which the loader refuses; check every decision, then delete that line.
 
 ### Run history and drift
 
