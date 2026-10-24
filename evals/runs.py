@@ -63,6 +63,8 @@ def build_run_record(kind, results, report, *, models, prompts, golden, filter_n
             "field_accuracy": {name: [correct, graded] for name, (correct, graded) in report.field_accuracy.items()},
             "judge_passed": report.judge_passed,
             "judge_total": report.judge_total,
+            "calibration": report.calibration,
+            "tokens": report.tokens,
         },
         "results": [dataclasses.asdict(result) for result in results],
     }
