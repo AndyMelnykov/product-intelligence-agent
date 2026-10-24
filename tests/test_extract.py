@@ -420,3 +420,34 @@ def test_migration_backfills_outcomes_for_extracted_evidence(tmp_path):
     assert db.get_extraction_state(conn, "EV-2026-000001")["status"] == "candidate"
     assert db.get_extraction_state(conn, "EV-2026-000001")["decided_by"] == "backfill"
     assert [e["evidence_id"] for e in db.get_evidence_pending_extraction(conn)] == ["EV-2026-000002"]
+
+
+@pytest.mark.parametrize("confidence", ["high", 1.7, -0.1, True, None, float("inf")])
+def test_invalid_confidence_is_a_response_error(confidence):
+    raw = json.dumps({"signal_type": "new_feature_demand", "summary": "s", "confidence": confidence})
+    with pytest.raises(extract.ExtractionResponseError, match="invalid confidence"):
+        extract.parse_extraction_text(raw, "x")
+
+
+def test_integer_confidence_is_returned_as_float():
+    raw = json.dumps({"signal_type": "new_feature_demand", "summary": "s", "confidence": 1})
+    assert extract.parse_extraction_text(raw, "x")["confidence"] == 1.0
+
+
+@pytest.mark.parametrize("summary", ["", "   ", 42, None, ["a"]])
+def test_empty_or_non_string_summary_is_a_response_error(summary):
+    raw = json.dumps({"signal_type": "new_feature_demand", "summary": summary, "confidence": 0.5})
+    with pytest.raises(extract.ExtractionResponseError, match="invalid summary"):
+        extract.parse_extraction_text(raw, "x")
+
+
+@pytest.mark.parametrize("skip", ["no", 1, "false", [True]])
+def test_only_literal_true_means_skip(skip):
+    raw = json.dumps({"skip": skip, "signal_type": "new_feature_demand", "summary": "s", "confidence": 0.5})
+    assert extract.parse_extraction_text(raw, "x")["signal_type"] == "new_feature_demand"
+
+
+@pytest.mark.parametrize("value", ["next spring", "2027-13-01", 20270531, ""])
+def test_unusable_effective_date_becomes_none(value):
+    raw = json.dumps({"signal_type": "new_feature_demand", "summary": "s", "confidence": 0.5, "effective_date": value})
+    assert extract.parse_extraction_text(raw, "x")["effective_date"] is None

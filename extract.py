@@ -1,4 +1,7 @@
+import datetime
 import json
+import math
+import re
 from collections import Counter
 
 import anthropic
@@ -100,7 +103,7 @@ def parse_extraction_text(raw_text, evidence_label):
     if not isinstance(parsed, dict):
         raise ExtractionResponseError(f"evidence {evidence_label}: expected a JSON object, got {raw_text!r}")
 
-    if parsed.get("skip"):
+    if parsed.get("skip") is True:
         return None
 
     missing = {"signal_type", "summary", "confidence"} - parsed.keys()
@@ -110,14 +113,38 @@ def parse_extraction_text(raw_text, evidence_label):
     if not isinstance(parsed["signal_type"], str) or parsed["signal_type"] not in SIGNAL_TYPES:
         raise ExtractionResponseError(f"evidence {evidence_label}: invalid signal_type {parsed['signal_type']!r}")
 
+    summary = parsed["summary"]
+    if not isinstance(summary, str) or not summary.strip():
+        raise ExtractionResponseError(f"evidence {evidence_label}: invalid summary {summary!r}")
+
+    confidence = parsed["confidence"]
+    if (isinstance(confidence, bool) or not isinstance(confidence, (int, float))
+            or not math.isfinite(confidence) or not 0.0 <= confidence <= 1.0):
+        raise ExtractionResponseError(f"evidence {evidence_label}: invalid confidence {confidence!r}")
+
     entity = parsed.get("entity")
     return {
         "signal_type": parsed["signal_type"],
-        "summary": parsed["summary"],
-        "confidence": parsed["confidence"],
+        "summary": summary,
+        "confidence": float(confidence),
         "entity": entity if isinstance(entity, dict) else None,
-        "effective_date": parsed.get("effective_date"),
+        "effective_date": _iso_date_or_none(parsed.get("effective_date")),
     }
+
+
+_ISO_DATE_RE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
+
+
+def _iso_date_or_none(value):
+    # Python 3.11's date.fromisoformat also accepts "20270531" and week dates like "2027-W22-1",
+    # so require the exact YYYY-MM-DD shape first, then check that it is a real calendar date.
+    if not isinstance(value, str) or not _ISO_DATE_RE.fullmatch(value):
+        return None
+    try:
+        datetime.date.fromisoformat(value)
+    except ValueError:
+        return None
+    return value
 
 
 def extract_topic(client, evidence: dict):
