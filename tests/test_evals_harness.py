@@ -764,3 +764,64 @@ def test_format_judge_agreement():
 
 def test_format_judge_agreement_with_nothing_graded():
     assert "0/0 (n/a)" in harness.format_judge_agreement(harness.judge_agreement([]))
+
+
+# --- confidence calibration and token usage ---
+
+class Usage:
+    input_tokens = 300
+    output_tokens = 40
+
+
+def cal_result(confidence, correct, status="passed"):
+    field = harness.FieldResult("signal_type", "signal_type", "a", "a" if correct else "b", correct)
+    return harness.ExampleResult("x", "s", status, [field], confidence=confidence)
+
+
+def test_grade_extraction_records_confidence_and_tokens():
+    response = FakeResponse(extraction_response(confidence=0.72))
+    response.usage = Usage()
+    client = FakeClient([])
+    client.messages.create = lambda **kw: response if not kw["model"].startswith("claude-opus") else FakeResponse(JUDGE_PASS)
+
+    result = harness.grade_extraction_example(EXAMPLE, client)
+
+    assert (result.confidence, result.input_tokens, result.output_tokens) == (0.72, 300, 40)
+
+
+def test_skipped_example_has_no_confidence():
+    result = harness.grade_extraction_example(SKIP_EXAMPLE, FakeClient([json.dumps({"skip": True})]))
+    assert result.confidence is None
+
+
+def test_calibration_bins_signal_type_accuracy_by_stated_confidence():
+    skip_only = harness.ExampleResult("s", "s", "passed", [harness.FieldResult("skip", "skip", True, True, True)])
+    results = [cal_result(0.95, True), cal_result(0.9, False), cal_result(1.0, True), cal_result(0.7, True),
+               cal_result(0.3, False), cal_result(0.99, True, status="errored"), skip_only]
+
+    rows = harness.calibration(results)
+
+    assert [(r["low"], r["high"], r["count"]) for r in rows] == [(0.0, 0.6, 1), (0.6, 0.85, 1), (0.85, 1.0, 3)]
+    assert rows[2]["accuracy"] == pytest.approx(2 / 3)
+    assert rows[2]["mean_confidence"] == pytest.approx((0.95 + 0.9 + 1.0) / 3)
+    assert harness.calibration_error(rows) == pytest.approx(
+        0.2 * 0.3 + 0.2 * 0.3 + 0.6 * abs(2 / 3 - (0.95 + 0.9 + 1.0) / 3))
+
+
+def test_calibration_of_nothing_is_empty_bins_and_no_error():
+    rows = harness.calibration([])
+    assert [r["count"] for r in rows] == [0, 0, 0]
+    assert harness.calibration_error(rows) is None
+
+
+def test_report_shows_calibration_and_tokens_in_ascii():
+    results = [cal_result(0.95, True), cal_result(0.5, False)]
+    results[0].input_tokens, results[0].output_tokens = 100, 10
+
+    text = harness.format_report(harness.aggregate(results))
+
+    assert "Confidence calibration" in text
+    assert "[0.85, 1.00]" in text and "<- materiality treats this as high confidence" in text
+    assert "expected calibration error" in text
+    assert "Extraction tokens: 100 in / 10 out over 1 calls" in text
+    text.encode("ascii")
