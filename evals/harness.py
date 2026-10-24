@@ -11,6 +11,7 @@ from pathlib import Path
 import yaml
 
 import extract
+import materiality
 import match
 from evals import judge
 
@@ -73,6 +74,9 @@ class ExampleResult:
     status: str
     fields: list = field(default_factory=list)
     error: str | None = None
+    confidence: float | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
 
 
 @dataclass
@@ -87,6 +91,8 @@ class Report:
     judge_total: int
     failures: list
     errors: list
+    calibration: list = field(default_factory=list)
+    tokens: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -347,17 +353,21 @@ def _parse_judge_case(file_path, position, raw):
 
 def grade_extraction_example(example, client):
     try:
-        actual = extract.extract_topic(client, {**example.evidence, "evidence_id": example.id})
+        reply = extract.request_extraction(client, {**example.evidence, "evidence_id": example.id})
     except extract.ExtractionAPIError as e:
         return ExampleResult(example.id, example.source, "errored", error=str(e))
+    usage = {"input_tokens": reply.input_tokens, "output_tokens": reply.output_tokens}
+    try:
+        actual = extract.parse_extraction_reply(reply, example.id)
     except extract.ExtractionResponseError as e:
-        return ExampleResult(example.id, example.source, "failed", error=str(e))
+        return ExampleResult(example.id, example.source, "failed", error=str(e), **usage)
 
+    extra = {**usage, "confidence": actual["confidence"] if actual else None}
     expected = example.expected
     actual_skip = actual is None
     fields = [_exact("skip", expected["skip"], actual_skip)]
     if expected["skip"] or actual_skip:
-        return _finish(example.id, example.source, fields)
+        return _finish(example.id, example.source, fields, **extra)
 
     fields.append(_exact("signal_type", expected["signal_type"], actual["signal_type"]))
     fields.append(FieldResult(
@@ -369,11 +379,11 @@ def grade_extraction_example(example, client):
     try:
         verdict = judge.judge_summary(example.evidence, example.reference_summary, actual["summary"], client)
     except judge.JudgeError as e:
-        return ExampleResult(example.id, example.source, "errored", fields, error=f"judge: {e}")
+        return ExampleResult(example.id, example.source, "errored", fields, error=f"judge: {e}", **extra)
     fields.append(FieldResult(
         "summary", "summary", example.reference_summary, actual["summary"], verdict.passed, detail=verdict.reason,
     ))
-    return _finish(example.id, example.source, fields)
+    return _finish(example.id, example.source, fields, **extra)
 
 
 def entity_matches(expected, actual):
@@ -395,9 +405,9 @@ def _exact(name, expected, actual):
     return FieldResult(name, name, expected, actual, expected == actual)
 
 
-def _finish(example_id, source, fields):
+def _finish(example_id, source, fields, **extra):
     status = "passed" if all(f.passed for f in fields) else "failed"
-    return ExampleResult(example_id, source, status, fields)
+    return ExampleResult(example_id, source, status, fields, **extra)
 
 
 def grade_matching_scenario(scenario, client):
@@ -504,6 +514,57 @@ def format_judge_agreement(agreement):
     ])
 
 
+CALIBRATION_BINS = (
+    (0.0, materiality.CONFIDENCE_MEDIUM_THRESHOLD),
+    (materiality.CONFIDENCE_MEDIUM_THRESHOLD, materiality.CONFIDENCE_HIGH_THRESHOLD),
+    (materiality.CONFIDENCE_HIGH_THRESHOLD, 1.0),
+)
+
+
+def _is_number(value):
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def calibration(results, bins=CALIBRATION_BINS):
+    """signal_type accuracy per stated-confidence bin, over graded results where signal_type was
+    compared. Bin edges are the materiality thresholds, so the last bin is what materiality
+    calls "high confidence". The last bin includes its upper edge."""
+    points = []
+    for result in results:
+        if result.status == "errored" or not _is_number(result.confidence):
+            continue
+        graded = next((f for f in result.fields if f.field == "signal_type"), None)
+        if graded is not None:
+            points.append((float(result.confidence), graded.passed))
+
+    rows = []
+    for i, (low, high) in enumerate(bins):
+        last = i == len(bins) - 1
+        in_bin = [(c, ok) for c, ok in points if low <= c < high or (last and c == high)]
+        rows.append({
+            "low": low, "high": high, "count": len(in_bin),
+            "mean_confidence": sum(c for c, _ in in_bin) / len(in_bin) if in_bin else None,
+            "accuracy": sum(ok for _, ok in in_bin) / len(in_bin) if in_bin else None,
+        })
+    return rows
+
+
+def calibration_error(rows):
+    """Expected calibration error: count-weighted mean |accuracy - mean confidence| over bins."""
+    total = sum(row["count"] for row in rows)
+    if not total:
+        return None
+    return sum(row["count"] / total * abs(row["accuracy"] - row["mean_confidence"]) for row in rows if row["count"])
+
+
+def _token_totals(results):
+    with_usage = [r for r in results if r.input_tokens is not None]
+    if not with_usage:
+        return {}
+    return {"calls": len(with_usage), "input": sum(r.input_tokens for r in with_usage),
+            "output": sum(r.output_tokens or 0 for r in with_usage)}
+
+
 def aggregate(results):
     field_accuracy = {}
     confusion = Counter()
@@ -531,6 +592,8 @@ def aggregate(results):
         judge_total=judge_total,
         failures=[r for r in results if r.status == "failed"],
         errors=[r for r in results if r.status == "errored"],
+        calibration=calibration(results),
+        tokens=_token_totals(results),
     )
 
 
@@ -548,6 +611,23 @@ def format_report(report):
     if report.judge_total:
         lines += ["", f"Summary judge pass rate: {report.judge_passed}/{report.judge_total} "
                       f"({_percent(report.judge_passed, report.judge_total)})"]
+
+    if any(row["count"] for row in report.calibration):
+        lines += ["", "Confidence calibration (signal_type accuracy by stated confidence, errored excluded):"]
+        for row in report.calibration:
+            closing = "]" if row is report.calibration[-1] else ")"
+            label = f"[{row['low']:.2f}, {row['high']:.2f}{closing}"
+            line = f"  {label:<14} n={row['count']}"
+            if row["count"]:
+                line += f"  mean confidence {row['mean_confidence']:.2f}  accuracy {100 * row['accuracy']:.1f}%"
+            if row["low"] == materiality.CONFIDENCE_HIGH_THRESHOLD:
+                line += "  <- materiality treats this as high confidence"
+            lines.append(line)
+        lines.append(f"  expected calibration error: {calibration_error(report.calibration):.3f}")
+
+    if report.tokens:
+        lines += ["", f"Extraction tokens: {report.tokens['input']} in / {report.tokens['output']} out "
+                      f"over {report.tokens['calls']} calls"]
 
     if report.signal_type_confusion:
         lines += ["", "signal_type confusion (expected -> actual):"]

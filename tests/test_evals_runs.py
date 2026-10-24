@@ -70,6 +70,12 @@ def test_build_run_record_captures_metadata_summary_and_results():
         "total": 2, "passed": 1, "failed": 0, "errored": 1,
         "field_accuracy": {"skip": [1, 1], "entity": [1, 1], "summary": [1, 1]},
         "judge_passed": 1, "judge_total": 1,
+        "calibration": [
+            {"low": 0.0, "high": 0.6, "count": 0, "mean_confidence": None, "accuracy": None},
+            {"low": 0.6, "high": 0.85, "count": 0, "mean_confidence": None, "accuracy": None},
+            {"low": 0.85, "high": 1.0, "count": 0, "mean_confidence": None, "accuracy": None},
+        ],
+        "tokens": {},
     }
     first = record["results"][0]
     assert (first["example_id"], first["source"], first["status"]) == ("db-001", "database_development", "passed")
@@ -248,3 +254,16 @@ def test_format_comparison_handles_runs_with_nothing_graded():
     assert "Pass rate (errored excluded): n/a -> n/a" in text
     assert "Regressions (passed -> failed): 0" in text
     assert "Warnings" not in text
+
+
+def test_compare_runs_accepts_records_without_new_fields():
+    old = make_record()
+    del old["summary"]["calibration"]
+    del old["summary"]["tokens"]
+    for result in old["results"]:
+        for key in ("confidence", "input_tokens", "output_tokens"):
+            result.pop(key, None)
+
+    comparison = runs.compare_runs(old, make_record())
+
+    assert comparison.regressions == []
