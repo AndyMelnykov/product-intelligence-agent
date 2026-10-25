@@ -1,7 +1,9 @@
 import json
 import re
 
-from evals import harness, oracles
+import pytest
+
+from evals import harness, oracles, paraphrase
 
 CANDIDATE_RE = re.compile(r'"index": (\d+),\s*"signal_type": "[^"]*",\s*"summary": "([^"]*)"')
 TOPIC_RE = re.compile(r'"topic_id": "([^"]+)",\s*"name": "([^"]+)"')
@@ -131,3 +133,81 @@ def test_api_error_marks_the_scenario_errored():
 
     result = oracles.check_matching_scenario(SCENARIO, Client(Down()), Reverse())
     assert result.status == "errored"
+
+
+EXAMPLE = harness.ExtractionExample(
+    id="db-001", source="database_development",
+    evidence={"title": "Migration tool times out", "content": "It hangs on 40M-row tables."},
+    expected={"skip": False, "signal_type": "reliability_issue", "entity": None, "effective_date": None},
+    reference_summary="r",
+)
+
+
+class ByTitle:
+    def __init__(self, answers):
+        self.answers, self.calls = answers, 0
+
+    def create(self, **kwargs):
+        self.calls += 1
+        prompt = kwargs["messages"][0]["content"]
+        title = next(t for t in self.answers if t in prompt)
+        return Response(self.answers[title])
+
+
+def extraction(signal_type):
+    return json.dumps({"signal_type": signal_type, "summary": "s", "confidence": 0.9})
+
+
+def test_stable_extractor_passes_and_unstable_paraphrase_fails():
+    paraphrases = [{"title": "Migrations hang", "content": "big tables"}, {"title": "Is there dark mode", "content": "?"}]
+    client = Client(ByTitle({"Migration tool times out": extraction("reliability_issue"),
+                             "Migrations hang": extraction("reliability_issue"),
+                             "Is there dark mode": json.dumps({"skip": True})}))
+
+    result = oracles.check_extraction_stability(EXAMPLE, paraphrases, client)
+
+    assert result.status == "failed"
+    assert [(f.label, f.expected, f.actual, f.passed) for f in result.fields] == [
+        ("paraphrase[0]", "reliability_issue", "reliability_issue", True),
+        ("paraphrase[1]", "reliability_issue", "SKIP", False),
+    ]
+
+
+def test_unusable_paraphrase_response_fails_only_that_field():
+    client = Client(ByTitle({"Migration tool times out": extraction("reliability_issue"), "P1": "not json"}))
+    result = oracles.check_extraction_stability(EXAMPLE, [{"title": "P1", "content": "c"}], client)
+    assert result.fields[0].passed is False
+    assert result.fields[0].actual.startswith("unusable")
+
+
+def test_generate_paraphrases_parses_and_trims():
+    class One:
+        def create(self, **kwargs):
+            assert kwargs["model"] == paraphrase.PARAPHRASE_MODEL
+            return Response(json.dumps([{"title": " A ", "content": "x"}, {"title": "", "content": "y"},
+                                        "junk", {"title": "B", "content": "z"}, {"title": "C", "content": "w"}]))
+
+    assert paraphrase.generate_paraphrases(Client(One()), EXAMPLE.evidence, 2) == [
+        {"title": "A", "content": "x"}, {"title": "B", "content": "z"}]
+
+
+def test_generate_paraphrases_rejects_unusable_output():
+    class Bad:
+        def create(self, **kwargs):
+            return Response("[]")
+
+    with pytest.raises(paraphrase.ParaphraseError):
+        paraphrase.generate_paraphrases(Client(Bad()), EXAMPLE.evidence, 2)
+
+
+def test_paraphrase_cache_round_trips_and_validates(tmp_path):
+    examples = {"db-001": [{"title": "t", "content": "c"}]}
+    path = paraphrase.save_paraphrases("database_development", examples, tmp_path)
+
+    assert path.read_text(encoding="utf-8").startswith("# Paraphrases")
+    assert paraphrase.load_paraphrases("database_development", tmp_path) == examples
+    assert paraphrase.load_paraphrases("missing", tmp_path) == {}
+
+    path.write_text("examples:\n  db-001:\n    - title: 1\n", encoding="utf-8")
+    with pytest.raises(harness.GoldenSchemaError, match="db-001"):
+        paraphrase.load_paraphrases("database_development", tmp_path)

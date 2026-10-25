@@ -1,4 +1,4 @@
-"""Label-free checks ("oracles") for the matching stage.
+"""Label-free checks ("oracles") for the matching and extraction stages.
 
 Golden sets need a human label for every example. These checks need none: they ask the model the
 same question in ways that must not change the answer, and count how often the answer changes.
@@ -9,9 +9,13 @@ Matching, per scenario (4 calls):
 - order: the candidates shuffled. Where a candidate lands must not depend on its position.
 - self_match: every topic the first run proposed is added to the registry and the same
   candidates are sent again. Each must now match the topic it created.
+
+Extraction, per example (1 + N calls): N cached paraphrases of the post must get the same skip
+decision and signal_type as the original did (see evals/paraphrase.py).
 """
 from dataclasses import dataclass, field
 
+import extract
 import match
 from evals.harness import ExampleResult, FieldResult
 
@@ -94,3 +98,30 @@ def check_matching_scenario(scenario, client, rng):
     except match.MatchResponseError as e:
         return ExampleResult(scenario.name, scenario.source, "failed", error=str(e))
     return ExampleResult(scenario.name, scenario.source, _status(fields), fields)
+
+
+def _label(client, evidence):
+    result = extract.extract_topic(client, evidence)
+    return "SKIP" if result is None else result["signal_type"]
+
+
+def check_extraction_stability(example, paraphrases, client):
+    try:
+        original = _label(client, {**example.evidence, "evidence_id": example.id})
+    except extract.ExtractionAPIError as e:
+        return ExampleResult(example.id, example.source, "errored", error=str(e))
+    except extract.ExtractionResponseError as e:
+        return ExampleResult(example.id, example.source, "failed", error=f"original: {e}")
+
+    fields = []
+    for k, item in enumerate(paraphrases):
+        label = f"paraphrase[{k}]"
+        try:
+            got = _label(client, {**item, "evidence_id": f"{example.id}~{k}"})
+        except extract.ExtractionAPIError as e:
+            return ExampleResult(example.id, example.source, "errored", fields, error=str(e))
+        except extract.ExtractionResponseError as e:
+            fields.append(FieldResult("stability", label, original, f"unusable: {e}", False))
+            continue
+        fields.append(FieldResult("stability", label, original, got, got == original))
+    return ExampleResult(example.id, example.source, _status(fields), fields)
