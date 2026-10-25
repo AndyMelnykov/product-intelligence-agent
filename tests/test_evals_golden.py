@@ -22,3 +22,11 @@ def test_committed_judge_calibration_set_is_valid_and_labeled():
     cases = harness.load_golden_dir(GOLDEN_DIR / "judge", "judge")
 
     assert {c.human_verdict for c in cases} == {"pass", "fail"}
+
+
+def test_committed_paraphrase_files_are_valid():
+    from evals import paraphrase
+    if not paraphrase.PARAPHRASE_DIR.exists():
+        return
+    for path in paraphrase.PARAPHRASE_DIR.glob("*.yaml"):
+        paraphrase.load_paraphrases(path.stem)
