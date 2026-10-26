@@ -16,7 +16,7 @@ from pathlib import Path
 from fingerprints import fingerprint
 
 SCHEMA_VERSION = 1
-KINDS = ("extraction", "matching", "judge")
+KINDS = ("extraction", "matching", "judge", "oracle_matching", "oracle_extraction")
 DEFAULT_RESULTS_DIR = Path(__file__).resolve().parent / "results"
 
 _SAVE_SUFFIX_RE = re.compile(r"Z-(\d+)$")
