@@ -5,7 +5,10 @@ import yaml
 
 import extract
 import match
-from evals import compare_runs, export_judge_cases, harness, judge, run_extraction_eval, run_judge_eval, run_matching_eval, runs
+from evals import (
+    compare_runs, export_judge_cases, harness, judge, paraphrase, run_extraction_eval, run_judge_eval,
+    run_matching_eval, run_oracle_eval, runs,
+)
 
 
 class FakeContentBlock:
@@ -274,3 +277,54 @@ def test_export_refuses_to_overwrite_and_rejects_non_extraction_runs(tmp_path, c
     matching_file = saved_matching_run(tmp_path, T0)
     assert export_judge_cases.main([str(matching_file), "--out", str(tmp_path / "x.yaml")]) == 2
     assert "extraction" in capsys.readouterr().err
+
+
+class Routing:
+    """Answers paraphrase prompts with two paraphrases and everything else with one extraction."""
+
+    def create(self, **kwargs):
+        prompt = kwargs["messages"][0]["content"]
+        if prompt.startswith("Rewrite the Reddit post"):
+            return FakeResponse(json.dumps([{"title": "p1", "content": "c"}, {"title": "p2", "content": "c"}]))
+        return FakeResponse(json.dumps({"signal_type": "reliability_issue", "summary": "s", "confidence": 0.9}))
+
+
+class RoutingClient:
+    def __init__(self):
+        self.messages = Routing()
+
+
+def test_oracle_extraction_without_cached_paraphrases_exits_2_and_spends_nothing(tmp_path, capsys):
+    client = RepeatingClient(RuntimeError("must not be called"))
+
+    code = run_oracle_eval.main(["--kind", "extraction", "--filter", "database_development",
+                                 "--paraphrase-dir", str(tmp_path / "p"), "--results-dir", str(tmp_path)], client=client)
+
+    assert code == 2
+    assert "--generate-missing" in capsys.readouterr().err
+
+
+def test_oracle_extraction_generates_missing_paraphrases_then_saves_a_run(tmp_path):
+    pdir = tmp_path / "p"
+
+    code = run_oracle_eval.main(["--kind", "extraction", "--filter", "database_development", "--paraphrases", "2",
+                                 "--generate-missing", "--paraphrase-dir", str(pdir), "--results-dir", str(tmp_path)],
+                                client=RoutingClient())
+
+    assert code == 0
+    cached = paraphrase.load_paraphrases("database_development", pdir)
+    assert cached and all(len(v) == 2 for v in cached.values())
+    [(path, record)], _ = runs.find_runs(tmp_path, "oracle_extraction")
+    assert record["models"]["paraphrase"] == paraphrase.PARAPHRASE_MODEL
+    assert set(record["prompts"]) == {"extraction", "paraphrase"}
+    assert record["summary"]["field_accuracy"]["stability"][1] > 0
+
+
+def test_oracle_matching_runs_each_scenario_and_saves(tmp_path):
+    client = RepeatingClient(MATCH_OK)
+
+    code = run_oracle_eval.main(["--kind", "matching", *POOLING, "--results-dir", str(tmp_path)], client=client)
+
+    assert code == 0
+    [(path, record)], _ = runs.find_runs(tmp_path, "oracle_matching")
+    assert record["summary"]["field_accuracy"]["identity"] == [1, 1]

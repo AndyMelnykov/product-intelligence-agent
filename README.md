@@ -415,3 +415,30 @@ python evals/run_judge_eval.py [--filter tuning|holdout] [--model MODEL]
 ### Tuning the judge rubric
 
 Follow Task 6 of `docs/superpowers/plans/2026-09-29-eval-run-history-and-judge-tuning-implementation.md`: baseline agreement on `tuning` and `holdout`, edit `JUDGE_PROMPT_TEMPLATE` in `evals/judge.py` against the disagreements on `tuning` only, and keep a change only if it does not lose agreement on `holdout` and does not add false passes. After a rubric change, the next extraction comparison will warn `judge prompt changed`. That is expected: summary pass-rate movement across that boundary is the judge, not the extractor.
+
+### Label-free checks
+
+These need no human labels, so they scale past the golden sets.
+
+- **Confidence calibration.** Every extraction run prints signal_type accuracy per stated-confidence bin. The bins are cut at the materiality thresholds (0.6, 0.85). The last bin is what materiality treats as "high confidence"; if its accuracy is far below its mean confidence, the materiality rule is trusting numbers that aren't true. With a few dozen examples the bins are noisy: read the counts.
+- **Matching oracles.**
+
+  ```powershell
+  python evals/run_oracle_eval.py --kind matching [--filter NAME] [--seed 0]
+  ```
+
+  4 calls per scenario:
+  - `identity`: the same input twice; the model's own noise;
+  - `order`: candidates shuffled;
+  - `self_match`: proposed topics added to the registry; each candidate must now match the topic it created.
+
+  Read `order` and `self_match` against `identity`.
+- **Extraction stability.**
+
+  ```powershell
+  python evals/run_oracle_eval.py --kind extraction [--filter FILE] --generate-missing
+  ```
+
+  The first run generates paraphrases into `evals/golden/paraphrases/`. Skim them, delete any that change the meaning, and commit them. Later runs reuse the cache (drop `--generate-missing`). A paraphrase must get the same skip decision and signal_type as the original.
+- Oracle runs save as `oracle_matching` / `oracle_extraction`. Compare them with `python evals/compare_runs.py --kind oracle_matching`.
+- **Parser fuzzing.** `tests/test_response_fuzz.py` (Hypothesis, in CI) feeds random and near-valid model output to every parser. No output may crash a parser or slip an invalid value through.
