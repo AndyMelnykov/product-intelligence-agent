@@ -451,3 +451,24 @@ def test_only_literal_true_means_skip(skip):
 def test_unusable_effective_date_becomes_none(value):
     raw = json.dumps({"signal_type": "new_feature_demand", "summary": "s", "confidence": 0.5, "effective_date": value})
     assert extract.parse_extraction_text(raw, "x")["effective_date"] is None
+
+
+class CapturingMessages:
+    def __init__(self, text):
+        self.text, self.kwargs = text, None
+
+    def create(self, **kwargs):
+        self.kwargs = kwargs
+        return FakeResponse(self.text)
+
+
+def test_request_extraction_sends_effort_only_when_configured(monkeypatch):
+    client = FakeClient([])
+    client.messages = CapturingMessages(VALID)
+
+    extract.request_extraction(client, SAMPLE_EVIDENCE)
+    assert "output_config" not in client.messages.kwargs
+
+    monkeypatch.setattr(extract, "EXTRACTION_EFFORT", "low")
+    extract.request_extraction(client, SAMPLE_EVIDENCE)
+    assert client.messages.kwargs["output_config"] == {"effort": "low"}

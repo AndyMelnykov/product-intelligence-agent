@@ -26,6 +26,8 @@ def main(argv=None, client=None):
     parser = argparse.ArgumentParser(description="Grade extract.extract_topic against the golden set.")
     parser.add_argument("--filter", help="only run the golden file with this basename, e.g. database_development")
     parser.add_argument("--model", help=f"override extract.EXTRACTION_MODEL (default: {extract.EXTRACTION_MODEL})")
+    parser.add_argument("--effort", choices=extract.EFFORT_LEVELS,
+                        help="override extract.EXTRACTION_EFFORT (default: the model's own default)")
     parser.add_argument("--no-save", action="store_true", help="do not save this run to --results-dir")
     parser.add_argument("--results-dir", default=str(runs.DEFAULT_RESULTS_DIR),
                         help="where to save the run (default: evals/results)")
@@ -46,6 +48,8 @@ def main(argv=None, client=None):
 
     if args.model:
         extract.EXTRACTION_MODEL = args.model
+    if args.effort:
+        extract.EXTRACTION_EFFORT = args.effort
 
     if client is None:
         try:
@@ -55,7 +59,8 @@ def main(argv=None, client=None):
             return 2
 
     started_at = datetime.datetime.now(datetime.timezone.utc)
-    print(f"extraction model: {extract.EXTRACTION_MODEL}, judge model: {judge.JUDGE_MODEL}")
+    print(f"extraction model: {extract.EXTRACTION_MODEL} (effort: {extract.EXTRACTION_EFFORT or 'default'}), "
+          f"judge model: {judge.JUDGE_MODEL}")
     results = []
     for number, example in enumerate(selected, 1):
         result = harness.grade_extraction_example(example, client)
@@ -76,6 +81,7 @@ def main(argv=None, client=None):
             },
             golden=runs.golden_fingerprint(selected),
             filter_name=args.filter, started_at=started_at, commit=runs.git_commit(),
+            settings={"extraction_effort": extract.EXTRACTION_EFFORT},
         )
         runs.save_and_announce(record, args.results_dir)
     return 0

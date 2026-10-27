@@ -267,3 +267,18 @@ def test_compare_runs_accepts_records_without_new_fields():
     comparison = runs.compare_runs(old, make_record())
 
     assert comparison.regressions == []
+
+
+def test_compare_runs_warns_when_a_setting_changes():
+    baseline = make_record()
+    current = make_record()
+    current["settings"] = {"extraction_effort": "low"}
+
+    comparison = runs.compare_runs(baseline, current)
+
+    assert "extraction_effort setting changed: None -> low" in comparison.warnings
+
+
+def test_build_run_record_stores_settings():
+    record = make_record(settings={"extraction_effort": "medium"})
+    assert record["settings"] == {"extraction_effort": "medium"}

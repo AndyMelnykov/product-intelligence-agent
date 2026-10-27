@@ -43,7 +43,8 @@ def git_commit():
     return completed.stdout.strip() or None
 
 
-def build_run_record(kind, results, report, *, models, prompts, golden, filter_name, started_at, commit):
+def build_run_record(kind, results, report, *, models, prompts, golden, filter_name, started_at, commit,
+                     settings=None):
     if kind not in KINDS:
         raise ValueError(f"unknown run kind {kind!r}")
     return {
@@ -54,6 +55,7 @@ def build_run_record(kind, results, report, *, models, prompts, golden, filter_n
         "filter": filter_name,
         "models": dict(models),
         "prompts": dict(prompts),
+        "settings": dict(settings or {}),
         "golden_fingerprint": golden,
         "summary": {
             "total": report.total,
@@ -157,7 +159,7 @@ def compare_runs(baseline, current):
         raise ValueError(f"cannot compare a {baseline['kind']} run with a {current['kind']} run")
 
     warnings = []
-    for key, noun in (("models", "model"), ("prompts", "prompt")):
+    for key, noun in (("models", "model"), ("prompts", "prompt"), ("settings", "setting")):
         before, after = baseline.get(key) or {}, current.get(key) or {}
         for name in sorted(before.keys() | after.keys()):
             if before.get(name) != after.get(name):

@@ -27,6 +27,8 @@ SIGNAL_TYPES = {
 }
 
 EXTRACTION_MODEL = "claude-sonnet-5"
+EXTRACTION_EFFORT = None  # None = the model's default effort (high on Sonnet 5)
+EFFORT_LEVELS = ("low", "medium", "high", "xhigh", "max")
 MAX_EXTRACTION_ATTEMPTS = 3
 MAX_CONSECUTIVE_API_ERRORS = 5
 
@@ -75,12 +77,15 @@ def _label(evidence):
 
 def request_extraction(client, evidence):
     """Make the extraction API call. Returns an LLMReply; raises ExtractionAPIError if the call itself fails."""
+    request = {
+        "model": EXTRACTION_MODEL,
+        "max_tokens": 4000,
+        "messages": [{"role": "user", "content": build_extraction_prompt(evidence)}],
+    }
+    if EXTRACTION_EFFORT:
+        request["output_config"] = {"effort": EXTRACTION_EFFORT}
     try:
-        response = client.messages.create(
-            model=EXTRACTION_MODEL,
-            max_tokens=4000,
-            messages=[{"role": "user", "content": build_extraction_prompt(evidence)}],
-        )
+        response = client.messages.create(**request)
     except Exception as e:
         raise ExtractionAPIError(f"evidence {_label(evidence)}: API call failed: {e}") from e
     return reply_from_response(response)
