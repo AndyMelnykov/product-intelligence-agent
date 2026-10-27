@@ -328,3 +328,24 @@ def test_oracle_matching_runs_each_scenario_and_saves(tmp_path):
     assert code == 0
     [(path, record)], _ = runs.find_runs(tmp_path, "oracle_matching")
     assert record["summary"]["field_accuracy"]["identity"] == [1, 1]
+
+
+def test_extraction_runner_effort_flag_is_applied_and_recorded(tmp_path, monkeypatch):
+    seen = []
+
+    class Capturing(RepeatingMessages):
+        def create(self, **kwargs):
+            seen.append(kwargs.get("output_config"))
+            return super().create(**kwargs)
+
+    client = RepeatingClient(json.dumps({"skip": True}))
+    client.messages = Capturing(json.dumps({"skip": True}))
+    monkeypatch.setattr(extract, "EXTRACTION_EFFORT", None)
+
+    code = run_extraction_eval.main(["--filter", "database_development", "--effort", "low",
+                                     "--results-dir", str(tmp_path)], client=client)
+
+    assert code == 0
+    assert {"effort": "low"} in seen
+    [(path, record)], _ = runs.find_runs(tmp_path, "extraction")
+    assert record["settings"] == {"extraction_effort": "low"}
