@@ -147,3 +147,19 @@ def test_calls_and_usage_commands(tmp_path, capsys):
     query.usage_command(conn, since=None)
     usage = json.loads(capsys.readouterr().out)
     assert usage == [{"stage": "extract", "model": "claude-sonnet-5", "calls": 1, "input_tokens": 100, "output_tokens": 7}]
+
+
+def test_triage_audit_reports_false_skips(tmp_path, capsys):
+    conn = db.connect(seed_db(tmp_path))
+    evidence_id = conn.execute("SELECT evidence_id FROM evidence").fetchone()[0]
+    call_id = ledger.start_call(conn, stage="triage", subject_key=evidence_id, model="claude-haiku-5-5",
+                                prompt_template="T", request_meta={"audit": True, "threshold": 0.9})
+    ledger.finish_call(conn, call_id, status="succeeded", parsed={"route": "skip", "confidence": 0.95, "reason": "x"})
+    db.record_extraction_outcome(conn, evidence_id, "candidate", None, decided_by="extractor")
+    conn.commit()
+
+    query.triage_audit_command(conn)
+
+    output = json.loads(capsys.readouterr().out)
+    assert (output["audited_skips"], output["false_skips"], output["false_skip_rate"]) == (1, 1, 1.0)
+    assert output["false_skip_evidence_ids"] == [evidence_id]

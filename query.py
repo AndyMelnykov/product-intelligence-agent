@@ -45,6 +45,10 @@ def usage_command(conn, since):
     print(json.dumps(db.llm_usage(conn, since=since), indent=2))
 
 
+def triage_audit_command(conn):
+    print(json.dumps(db.triage_audit(conn), indent=2))
+
+
 def main():
     parser = argparse.ArgumentParser(description="Ad hoc read-only queries against the product intelligence DB")
     parser.add_argument("--db-path", default="data/pi_agent.db")
@@ -69,6 +73,8 @@ def main():
     usage_parser = subparsers.add_parser("usage", help="LLM calls and tokens per stage and model")
     usage_parser.add_argument("--since", help="ISO date, e.g. 2026-10-01")
 
+    subparsers.add_parser("triage-audit", help="how often triage skips were wrong, from the 5% audit sample")
+
     args = parser.parse_args()
     conn = db.connect(args.db_path)
     db.init_db(conn)
@@ -85,6 +91,8 @@ def main():
         calls_command(conn, args.stage, args.status, args.limit)
     elif args.command == "usage":
         usage_command(conn, args.since)
+    elif args.command == "triage-audit":
+        triage_audit_command(conn)
 
     conn.close()
 
