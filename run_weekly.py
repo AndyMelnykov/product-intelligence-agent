@@ -13,7 +13,7 @@ STAGES = ["fetch", "extract", "match", "report", "materiality"]
 def run_all(config_path="config.yaml", today=None):
     config = load_config(config_path)
     fetch.run(config["subreddits"], config["fetch_limit_per_subreddit"], today=today)
-    extract.run(today=today)
+    extract.run(today=today, cascade=config["extraction_cascade"])
     match.run(today=today)
     report.run(trend_window_weeks=config["trend_window_weeks"], today=today)
     materiality.run(trend_window_weeks=config["trend_window_weeks"], today=today)
@@ -33,7 +33,7 @@ def main():
     if args.stage == "fetch":
         fetch.run(config["subreddits"], config["fetch_limit_per_subreddit"])
     elif args.stage == "extract":
-        extract.run()
+        extract.run(cascade=config["extraction_cascade"])
     elif args.stage == "match":
         match.run()
     elif args.stage == "report":

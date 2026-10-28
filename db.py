@@ -744,3 +744,28 @@ def move_candidates(conn, from_topic_id, to_topic_id, candidate_ids=None):
 def get_merge_redirects(conn):
     rows = conn.execute("SELECT topic_id FROM canonical_topic WHERE status = 'merged'").fetchall()
     return {r["topic_id"]: resolve_topic_id(conn, r["topic_id"]) for r in rows}
+
+
+def triage_audit(conn):
+    """Audit-sample triage calls that would have skipped (route=skip at or above their threshold),
+    against what the extractor then decided. A 'candidate' outcome is a false skip."""
+    rows = conn.execute(
+        "SELECT c.subject_key AS evidence_id, x.status AS outcome FROM llm_call c "
+        "LEFT JOIN evidence_extraction x ON x.evidence_id = c.subject_key "
+        "WHERE c.stage = 'triage' AND c.status = 'succeeded' "
+        "AND json_extract(c.request_meta, '$.audit') = 1 "
+        "AND json_extract(c.parsed, '$.route') = 'skip' "
+        "AND json_extract(c.parsed, '$.confidence') >= json_extract(c.request_meta, '$.threshold') "
+        "ORDER BY c.call_id"
+    ).fetchall()
+    false_ids = [r["evidence_id"] for r in rows if r["outcome"] == "candidate"]
+    agreed = sum(r["outcome"] == "skipped" for r in rows)
+    decided = agreed + len(false_ids)
+    return {
+        "audited_skips": len(rows),
+        "extractor_agreed": agreed,
+        "false_skips": len(false_ids),
+        "pending": len(rows) - decided,
+        "false_skip_rate": len(false_ids) / decided if decided else None,
+        "false_skip_evidence_ids": false_ids,
+    }

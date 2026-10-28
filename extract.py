@@ -1,4 +1,5 @@
 import datetime
+import hashlib
 import json
 import math
 import re
@@ -8,6 +9,7 @@ import anthropic
 
 import db
 import ledger
+import triage
 from credentials import get_secret
 from llm import reply_from_response
 
@@ -31,6 +33,7 @@ EXTRACTION_EFFORT = None  # None = the model's default effort (high on Sonnet 5)
 EFFORT_LEVELS = ("low", "medium", "high", "xhigh", "max")
 MAX_EXTRACTION_ATTEMPTS = 3
 MAX_CONSECUTIVE_API_ERRORS = 5
+TRIAGE_AUDIT_RATE = 0.05
 
 EXTRACTION_PROMPT_TEMPLATE = """You are analyzing a Reddit post about a software product for product \
 feedback signal extraction.
@@ -156,9 +159,49 @@ def extract_topic(client, evidence: dict):
     return parse_extraction_reply(request_extraction(client, evidence), _label(evidence))
 
 
-def extract_one(conn, client, evidence):
+def in_audit_sample(evidence_id, rate=TRIAGE_AUDIT_RATE):
+    """Deterministic: a given evidence row is always in, or always out of, the audit sample."""
+    return int(hashlib.sha256(evidence_id.encode("utf-8")).hexdigest()[:8], 16) / 0xFFFFFFFF < rate
+
+
+def _triage_one(conn, client, evidence):
+    """Run triage through the ledger. Returns True only when triage skipped the post (outcome
+    recorded and committed). Any failure returns False, so the extractor sees the post (fail open)."""
+    evidence_id = evidence["evidence_id"]
+    audit = in_audit_sample(evidence_id)
+    call_id = ledger.start_call(
+        conn, stage="triage", subject_key=evidence_id, model=triage.TRIAGE_MODEL,
+        prompt_template=triage.TRIAGE_PROMPT_TEMPLATE,
+        request_meta={"audit": audit, "threshold": triage.TRIAGE_SKIP_THRESHOLD},
+    )
+    try:
+        reply = triage.request_triage(client, evidence)
+    except triage.TriageAPIError as e:
+        ledger.finish_call(conn, call_id, status="api_error", error=str(e))
+        conn.commit()
+        return False
+    try:
+        decision = triage.parse_triage_reply(reply, evidence_id)
+    except triage.TriageResponseError as e:
+        ledger.finish_call(conn, call_id, status="response_error", reply=reply, error=str(e))
+        conn.commit()
+        return False
+
+    ledger.finish_call(conn, call_id, status="succeeded", reply=reply,
+                       parsed={"route": decision.route, "confidence": decision.confidence, "reason": decision.reason})
+    skipped = triage.should_skip(decision) and not audit
+    if skipped:
+        db.record_extraction_outcome(conn, evidence_id, "skipped", call_id, decided_by="triage")
+    conn.commit()
+    return skipped
+
+
+def extract_one(conn, client, evidence, cascade=False):
     """One evidence row through the effect sandwich: record intent (committed), call the model,
-    then commit the outcome together with the ledger result. Returns the outcome name."""
+    then commit the outcome together with the ledger result. Returns the outcome name.
+    With cascade=True a triage call runs first and may skip the post."""
+    if cascade and _triage_one(conn, client, evidence):
+        return "triaged_skip"
     evidence_id = evidence["evidence_id"]
     call_id = ledger.start_call(
         conn, stage="extract", subject_key=evidence_id, model=EXTRACTION_MODEL,
@@ -207,18 +250,19 @@ def extract_one(conn, client, evidence):
     return outcome
 
 
-def run(db_path="data/pi_agent.db", today=None, client=None):
+def run(db_path="data/pi_agent.db", today=None, client=None, cascade=False):
     client = client or anthropic.Anthropic(api_key=get_secret("anthropic_api_key"))
     conn = db.connect(db_path)
     db.init_db(conn)
     counts = Counter()
     try:
-        abandoned = ledger.abandon_stale_calls(conn, "extract")
-        if abandoned:
-            print(f"marked {abandoned} interrupted extraction call(s) abandoned; their evidence will be retried")
+        for stage in ("triage", "extract"):
+            abandoned = ledger.abandon_stale_calls(conn, stage)
+            if abandoned:
+                print(f"marked {abandoned} interrupted {stage} call(s) abandoned; their evidence will be retried")
         consecutive_api_errors = 0
         for evidence in db.get_evidence_pending_extraction(conn):
-            outcome = extract_one(conn, client, evidence)
+            outcome = extract_one(conn, client, evidence, cascade=cascade)
             counts[outcome] += 1
             consecutive_api_errors = consecutive_api_errors + 1 if outcome == "api_error" else 0
             if consecutive_api_errors >= MAX_CONSECUTIVE_API_ERRORS:

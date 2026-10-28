@@ -7,6 +7,7 @@ import pytest
 import db
 import extract
 import ledger
+import triage as triage_module
 
 
 class FakeContentBlock:
@@ -472,3 +473,92 @@ def test_request_extraction_sends_effort_only_when_configured(monkeypatch):
     monkeypatch.setattr(extract, "EXTRACTION_EFFORT", "low")
     extract.request_extraction(client, SAMPLE_EVIDENCE)
     assert client.messages.kwargs["output_config"] == {"effort": "low"}
+
+
+TRIAGE_SKIP = json.dumps({"route": "skip", "confidence": 0.97, "reason": "spam"})
+TRIAGE_EXTRACT = json.dumps({"route": "extract", "confidence": 0.8, "reason": "feedback"})
+
+
+class ByModel:
+    """Answers triage (Haiku) and extraction (Sonnet) calls from separate queues."""
+
+    def __init__(self, triage_answers, extraction_answers):
+        self.triage, self.extraction = list(triage_answers), list(extraction_answers)
+        self.models = []
+
+    def create(self, **kwargs):
+        self.models.append(kwargs["model"])
+        queue = self.triage if kwargs["model"] == triage_module.TRIAGE_MODEL else self.extraction
+        result = queue.pop(0)
+        if isinstance(result, Exception):
+            raise result
+        return FakeResponse(result)
+
+
+def by_model(triage_answers, extraction_answers):
+    client = FakeClient([])
+    client.messages = ByModel(triage_answers, extraction_answers)
+    return client
+
+
+def test_confident_triage_skip_never_reaches_the_extractor(tmp_path, monkeypatch):
+    monkeypatch.setattr(extract, "in_audit_sample", lambda evidence_id, rate=0.05: False)
+    db_path, [evidence_id] = _seed(tmp_path)
+    client = by_model([TRIAGE_SKIP], [])
+
+    extract.run(db_path=db_path, client=client, cascade=True)
+
+    conn = db.connect(db_path)
+    state = db.get_extraction_state(conn, evidence_id)
+    assert (state["status"], state["decided_by"]) == ("skipped", "triage")
+    assert client.messages.models == [triage_module.TRIAGE_MODEL]
+    call = ledger.get_call(conn, state["last_call_id"])
+    assert (call["stage"], call["parsed"]["route"], call["request_meta"]["audit"]) == ("triage", "skip", False)
+
+
+def test_triage_extract_route_goes_on_to_the_extractor(tmp_path):
+    db_path, [evidence_id] = _seed(tmp_path)
+
+    extract.run(db_path=db_path, client=by_model([TRIAGE_EXTRACT], [VALID]), cascade=True)
+
+    conn = db.connect(db_path)
+    assert db.get_extraction_state(conn, evidence_id)["decided_by"] == "extractor"
+
+
+@pytest.mark.parametrize("triage_answer", [RuntimeError("haiku down"), "not json",
+                                           json.dumps({"route": "skip", "confidence": 0.5})])
+def test_triage_failure_falls_through_to_extraction(tmp_path, triage_answer):
+    db_path, [evidence_id] = _seed(tmp_path)
+
+    extract.run(db_path=db_path, client=by_model([triage_answer], [VALID]), cascade=True)
+
+    conn = db.connect(db_path)
+    assert db.get_extraction_state(conn, evidence_id)["status"] == "candidate"
+
+
+def test_audited_triage_skip_is_still_extracted(tmp_path, monkeypatch):
+    monkeypatch.setattr(extract, "in_audit_sample", lambda evidence_id, rate=0.05: True)
+    db_path, [evidence_id] = _seed(tmp_path)
+
+    extract.run(db_path=db_path, client=by_model([TRIAGE_SKIP], [VALID]), cascade=True)
+
+    conn = db.connect(db_path)
+    assert db.get_extraction_state(conn, evidence_id)["status"] == "candidate"
+    meta = conn.execute("SELECT request_meta FROM llm_call WHERE stage = 'triage'").fetchone()[0]
+    assert json.loads(meta)["audit"] is True
+
+
+def test_cascade_off_makes_no_triage_call(tmp_path):
+    db_path, _ = _seed(tmp_path)
+    client = by_model([], [VALID])
+
+    extract.run(db_path=db_path, client=client)
+
+    assert client.messages.models == [extract.EXTRACTION_MODEL]
+
+
+def test_audit_sample_is_deterministic_and_close_to_the_rate():
+    ids = [f"EV-2026-{i:06d}" for i in range(4000)]
+    sampled = [i for i in ids if extract.in_audit_sample(i)]
+    assert sampled == [i for i in ids if extract.in_audit_sample(i)]
+    assert 0.03 < len(sampled) / len(ids) < 0.07

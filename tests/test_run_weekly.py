@@ -74,3 +74,16 @@ def test_main_defaults_to_all_stages(tmp_path, monkeypatch):
     run_weekly.main()
 
     assert calls == ["fetch", "extract", "match", "report", "materiality"]
+
+
+def test_run_all_passes_the_cascade_flag_to_extract(tmp_path, monkeypatch):
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("subreddits:\n  - sub1\nextraction_cascade: true\n")
+    seen = {}
+    for stage in ("fetch", "match", "report", "materiality"):
+        monkeypatch.setattr(getattr(run_weekly, stage), "run", lambda *a, **kw: None)
+    monkeypatch.setattr(run_weekly.extract, "run", lambda *a, **kw: seen.update(kw))
+
+    run_weekly.run_all(config_path=str(config_path))
+
+    assert seen["cascade"] is True

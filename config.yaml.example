@@ -3,3 +3,6 @@ subreddits:
   - relatedcommunity
 fetch_limit_per_subreddit: 100
 trend_window_weeks: 8
+# Cheap Haiku triage before extraction; it can only skip obvious noise. Off until you have read
+# the triage eval (python evals/run_triage_eval.py) and ADR 007.
+extraction_cascade: false
