@@ -626,7 +626,7 @@ def format_report(report):
         lines.append(f"  expected calibration error: {calibration_error(report.calibration):.3f}")
 
     if report.tokens:
-        lines += ["", f"Extraction tokens: {report.tokens['input']} in / {report.tokens['output']} out "
+        lines += ["", f"Model tokens: {report.tokens['input']} in / {report.tokens['output']} out "
                       f"over {report.tokens['calls']} calls"]
 
     if report.signal_type_confusion:

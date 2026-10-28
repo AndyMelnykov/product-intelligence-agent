@@ -823,5 +823,5 @@ def test_report_shows_calibration_and_tokens_in_ascii():
     assert "Confidence calibration" in text
     assert "[0.85, 1.00]" in text and "<- materiality treats this as high confidence" in text
     assert "expected calibration error" in text
-    assert "Extraction tokens: 100 in / 10 out over 1 calls" in text
+    assert "Model tokens: 100 in / 10 out over 1 calls" in text
     text.encode("ascii")
