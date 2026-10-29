@@ -181,6 +181,7 @@ evidence (source data, immutable)
 | Materiality scoring | Deterministic rule table in `materiality.py` (signal-type impact class × confidence × trend × mention count) | The same signal type and evidence must always produce the same materiality label; a categorical rule table avoids the "fake mathematical precision" of an LLM-generated score |
 | Writes | Fully autonomous for local storage (SQLite, JSONL); no writes ever leave the local system | The pipeline only reads Reddit and writes to its own database/files — there is no external side effect that would need human approval |
 | Durability | Effect sandwich per model call, recorded in an llm_call ledger | A crash loses at most one call; skips and failures are outcomes, not retries (ADR 005) |
+| Cost | Optional Haiku triage that can only skip, behind extraction_cascade | ~20x cheaper per token on noise; fails open; false-skip rate measured on golden data and a 5% production audit (ADR 007) |
 | Downstream handoff | Emit a `product_intelligence.signal.material` event and stop; don't decide what to do about it | Keeps this repo an evidence system — interpreting a signal and deciding a response belongs to the (separate, not-yet-built) Strategic Signals Agent |
 
 See [docs/decisions/](docs/decisions/) for the fuller reasoning and alternatives
@@ -272,6 +273,7 @@ after the fact.
 5. Run the full weekly pipeline: `python run_weekly.py`
 6. Run a single stage (e.g. after fixing a bug in matching, without re-fetching):
    `python run_weekly.py --stage match`
+7. Optional: set `extraction_cascade: true` in `config.yaml` after reading ADR 007.
 
 For a fully detailed, click-by-click walkthrough (creating the Reddit/Anthropic API
 keys, saving them into Windows Credential Manager, verifying each step, and
@@ -388,6 +390,8 @@ python evals/run_matching_eval.py   [--filter connection_pooling_duplicate] [--m
 - Golden data lives in `evals/golden/extraction/<product_area>.yaml` (many examples per file) and `evals/golden/matching/<scenario>.yaml` (one scenario per file). See the design spec at `docs/superpowers/specs/2026-09-24-extraction-matching-evals-design.md` for the format. `tests/test_evals_golden.py` validates the committed golden files in CI.
 
 **Scenarios from production.** `python evals/export_matching_scenario.py --week 2026-W40` drafts a matching scenario from one real week: the registry as it stood the week before, plus that week's candidates and where production put them. Drafts carry `draft: true`, which the loader refuses; check every decision, then delete that line.
+
+`python evals/run_triage_eval.py` grades triage against the extraction golden set's skip labels and prints a skip-threshold sweep with every false skip. `python evals/run_extraction_eval.py --effort low|medium` measures the cheaper-effort alternative; the effort is recorded and comparisons warn when it changes.
 
 ### Run history and drift
 
