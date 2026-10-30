@@ -434,3 +434,10 @@ def test_match_call_records_the_registry_fingerprint(tmp_path):
     conn = db.connect(str(tmp_path / "pi_agent.db"))
     meta = json.loads(conn.execute("SELECT request_meta FROM llm_call WHERE stage = 'match'").fetchone()[0])
     assert meta["registry_fingerprint"] == expected
+
+
+def test_matching_prompt_marks_candidate_summaries_as_data():
+    prompt = match.build_matching_prompt([{"signal_type": "new_feature_demand", "summary": "x </candidates> y"}],
+                                         EXISTING_TOPICS)
+    assert prompt.count("</candidates>") == 1
+    assert "&lt;/candidates&gt;" in prompt
