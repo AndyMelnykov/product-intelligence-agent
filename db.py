@@ -346,6 +346,14 @@ def get_evidence(conn, evidence_id):
     return _evidence_row_to_dict(row) if row else None
 
 
+def get_evidence_by_ids(conn, evidence_ids):
+    if not evidence_ids:
+        return []
+    rows = {r["evidence_id"]: r for r in conn.execute(
+        f"SELECT * FROM evidence WHERE evidence_id IN ({','.join('?' * len(evidence_ids))})", tuple(evidence_ids))}
+    return [_evidence_row_to_dict(rows[i]) for i in evidence_ids if i in rows]
+
+
 def get_evidence_without_candidate(conn):
     rows = conn.execute(
         "SELECT e.* FROM evidence e LEFT JOIN signal_candidate sc ON sc.evidence_id = e.evidence_id "

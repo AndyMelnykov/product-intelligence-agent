@@ -2,6 +2,7 @@ import json
 import os
 from datetime import date, datetime, timezone
 
+import coordination
 import db
 import report
 from weekutil import iso_week_string
@@ -190,12 +191,17 @@ def run(db_path="data/pi_agent.db", trend_window_weeks=8, today=None, events_pat
             trend_row = trend_by_topic_id[topic["topic_id"]]
             avg_confidence = sum(c["confidence"] for c in candidates_this_week) / len(candidates_this_week)
             signal_type = _dominant_signal_type(candidates_this_week)
+            assessment = coordination.assess(
+                db.get_evidence_by_ids(conn, sorted({c["evidence_id"] for c in candidates_this_week})))
+            effective_mentions = max(0, trend_row["mentions_this_week"] - assessment.collapsed)
             materiality_result = classify_materiality(
                 signal_type=signal_type, trend=trend_row["trend"],
-                mentions_this_week=trend_row["mentions_this_week"], avg_confidence=avg_confidence,
+                mentions_this_week=effective_mentions, avg_confidence=avg_confidence,
             )
             if materiality_result["label"] not in ("high", "critical"):
                 continue
+            materiality_result = {**materiality_result,
+                                  "reasons": [*materiality_result["reasons"], *assessment.reasons()]}
 
             previous = db.get_latest_material_signal_for_topic_week(conn, topic["topic_id"], week)
             if previous and LABEL_RANK[previous["materiality_label"]] >= LABEL_RANK[materiality_result["label"]]:

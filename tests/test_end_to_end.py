@@ -150,11 +150,19 @@ def test_pipeline_emits_material_signal_when_topic_crosses_high_threshold(tmp_pa
     conn.close()
     assert not events_path.exists()
 
+    WEEK2_BODIES = [
+        "Please add a dark theme, my eyes hurt at night.",
+        "A night mode would make late shifts much easier.",
+        "Every other editor I use has a dark UI option by now.",
+        "White background is blinding on my OLED laptop.",
+        "Would pay extra for a proper dark color scheme.",
+        "Dark mode please, the current theme is too bright for me.",
+    ]
     week2_posts = [
         FakeSubmission(
-            fullname=f"t3_p{i}", id=f"p{i}", title="More dark mode requests",
-            selftext="Still no dark theme", permalink=f"/r/yourproductname/comments/p{i}",
-            score=5, num_comments=1, created_utc=1700500000.0,
+            fullname=f"t3_p{i}", id=f"p{i}", title="Dark mode request",
+            selftext=WEEK2_BODIES[i - 2], permalink=f"/r/yourproductname/comments/p{i}",
+            score=5, num_comments=1, created_utc=1700500000.0 + 7200 * i,
         )
         for i in range(2, 8)
     ]
