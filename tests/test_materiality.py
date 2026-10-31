@@ -7,6 +7,15 @@ import pytest
 import db
 import materiality
 
+DISTINCT_BODIES = [
+    "Please add a dark theme, my eyes hurt at night.",
+    "A night mode would make late shifts much easier.",
+    "Every other editor I use has a dark UI option by now.",
+    "White background is blinding on my OLED laptop.",
+    "Would pay extra for a proper dark color scheme.",
+    "Dark mode please, the current theme is too bright for me.",
+]
+
 
 def test_confidence_label_buckets_by_threshold():
     assert materiality.confidence_label(0.9) == "high"
@@ -178,7 +187,7 @@ def test_run_creates_material_signal_and_emits_event_for_high_materiality_topic(
         evidence_id = db.insert_evidence(
             conn, source_type="reddit_post", source_name="sub", source_url=f"/p{i}",
             captured_at="2026-08-15T00:00:00+00:00", published_at="2026-08-14T00:00:00+00:00",
-            title="t", content="c", metadata={},
+            title="Dark mode", content=DISTINCT_BODIES[i], metadata={},
         )
         db.insert_signal_candidate(
             conn, evidence_id=evidence_id, signal_type="new_feature_demand",
@@ -270,7 +279,7 @@ def _seed_high_topic(db_path):
         evidence_id = db.insert_evidence(
             conn, source_type="reddit_post", source_name="sub", source_url=f"/p{i}",
             captured_at="2026-08-15T00:00:00+00:00", published_at="2026-08-14T00:00:00+00:00",
-            title="t", content="c", metadata={},
+            title="Dark mode", content=DISTINCT_BODIES[i], metadata={},
         )
         db.insert_signal_candidate(conn, evidence_id=evidence_id, signal_type="new_feature_demand",
                                    summary="s", confidence=0.9, topic_id=topic_id)
@@ -378,3 +387,47 @@ def test_migration_marks_existing_signals_as_already_emitted(tmp_path):
 
     assert conn.execute("SELECT week FROM material_signal").fetchone()[0] == "2026-W33"
     assert db.get_pending_outbox(conn) == []
+
+
+def _seed_topic_with_posts(db_path, bodies, published=None):
+    conn = db.connect(db_path)
+    db.init_db(conn)
+    topic_id = db.insert_canonical_topic(conn, slug="dark-mode-support", name="Dark mode support", description="d",
+                                         aliases=[], first_seen="2026-W30", last_seen="2026-W30")
+    for week in ("2026-W30", "2026-W31", "2026-W32"):
+        db.increment_topic_weekly_mentions(conn, topic_id, week, amount=1)
+    for i, body in enumerate(bodies):
+        evidence_id = db.insert_evidence(
+            conn, source_type="reddit_post", source_name="sub", source_url=f"/q{i}",
+            captured_at="2026-08-15T00:00:00+00:00",
+            published_at=(published[i] if published else f"2026-08-1{i % 5}T09:00:00+00:00"),
+            title="Dark mode", content=body, metadata={},
+        )
+        db.insert_signal_candidate(conn, evidence_id=evidence_id, signal_type="new_feature_demand",
+                                   summary="s", confidence=0.9, topic_id=topic_id)
+    db.increment_topic_weekly_mentions(conn, topic_id, "2026-W33", amount=len(bodies))
+    conn.commit()
+    conn.close()
+
+
+def test_six_copies_of_one_post_do_not_make_a_material_signal(tmp_path):
+    db_path, events = str(tmp_path / "pi.db"), tmp_path / "ev.jsonl"
+    _seed_topic_with_posts(db_path, ["Please add a dark theme, my eyes hurt at night."] * 6)
+
+    materiality.run(db_path=db_path, today=date(2026, 8, 15), events_path=str(events))
+
+    conn = db.connect(db_path)
+    assert conn.execute("SELECT COUNT(*) FROM material_signal").fetchone()[0] == 0
+
+
+def test_burst_of_distinct_posts_is_flagged_not_collapsed(tmp_path):
+    db_path, events = str(tmp_path / "pi.db"), tmp_path / "ev.jsonl"
+    stamps = [f"2026-08-14T10:{m:02d}:00+00:00" for m in (0, 10, 20, 30, 40, 50)]
+    _seed_topic_with_posts(db_path, DISTINCT_BODIES, published=stamps)
+
+    materiality.run(db_path=db_path, today=date(2026, 8, 15), events_path=str(events))
+
+    conn = db.connect(db_path)
+    [row] = conn.execute("SELECT materiality_label, materiality_reasons FROM material_signal").fetchall()
+    assert row["materiality_label"] == "high"
+    assert "burst: 6 posts within 2h" in json.loads(row["materiality_reasons"])
