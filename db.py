@@ -224,6 +224,28 @@ def _migration_7_topic_lineage(conn):
     )
 
 
+def _migration_8_review_items(conn):
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS review_item (
+          item_id INTEGER PRIMARY KEY AUTOINCREMENT,
+          week TEXT NOT NULL,
+          kind TEXT NOT NULL,
+          from_topic_id TEXT REFERENCES canonical_topic(topic_id),
+          into_topic_id TEXT REFERENCES canonical_topic(topic_id),
+          topic_id TEXT REFERENCES canonical_topic(topic_id),
+          reason TEXT NOT NULL,
+          confidence REAL NOT NULL,
+          status TEXT NOT NULL,
+          llm_call_id INTEGER REFERENCES llm_call(call_id),
+          created_at TEXT NOT NULL,
+          resolved_at TEXT,
+          resolved_by TEXT,
+          resolution_note TEXT
+        )"""
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_review_item_status ON review_item(status)")
+
+
 # Schema changes after the v0 baseline above. Each entry is (version, function); the function
 # runs inside one transaction together with the PRAGMA user_version bump. Never edit SCHEMA_SQL
 # or renumber an entry that has shipped: append a new migration instead.
@@ -235,6 +257,7 @@ MIGRATIONS = [
     (5, _migration_5_signal_week_and_outbox),
     (6, _migration_6_topic_versions),
     (7, _migration_7_topic_lineage),
+    (8, _migration_8_review_items),
 ]
 
 
@@ -466,6 +489,60 @@ def get_canonical_topics(conn, include_merged=False):
     where = "" if include_merged else " WHERE status = 'active'"
     rows = conn.execute(f"SELECT * FROM canonical_topic{where} ORDER BY topic_id").fetchall()
     return [_topic_row_to_dict(r) for r in rows]
+
+
+def get_canonical_topic(conn, topic_id):
+    row = conn.execute("SELECT * FROM canonical_topic WHERE topic_id = ?", (topic_id,)).fetchone()
+    return _topic_row_to_dict(row) if row else None
+
+
+def insert_review_item(conn, *, week, item, llm_call_id):
+    cursor = conn.execute(
+        "INSERT INTO review_item (week, kind, from_topic_id, into_topic_id, topic_id, reason, confidence, status, "
+        "llm_call_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?, ?)",
+        (week, item["kind"], item["from_topic_id"], item["into_topic_id"], item["topic_id"], item["reason"],
+         item["confidence"], llm_call_id, utc_now()),
+    )
+    return cursor.lastrowid
+
+
+def review_item_known(conn, item):
+    """True when an open or rejected item already covers this suggestion (merge pairs in either order)."""
+    if item["kind"] == "merge":
+        sql = ("SELECT 1 FROM review_item WHERE kind = 'merge' AND status IN ('open', 'rejected') AND "
+               "((from_topic_id = ? AND into_topic_id = ?) OR (from_topic_id = ? AND into_topic_id = ?))")
+        params = (item["from_topic_id"], item["into_topic_id"], item["into_topic_id"], item["from_topic_id"])
+    else:
+        sql = "SELECT 1 FROM review_item WHERE kind = 'split' AND status IN ('open', 'rejected') AND topic_id = ?"
+        params = (item["topic_id"],)
+    return conn.execute(sql, params).fetchone() is not None
+
+
+def get_review_items(conn, status=None):
+    sql, params = "SELECT * FROM review_item", ()
+    if status:
+        sql, params = sql + " WHERE status = ?", (status,)
+    return [dict(r) for r in conn.execute(sql + " ORDER BY item_id", params).fetchall()]
+
+
+def get_review_item(conn, item_id):
+    row = conn.execute("SELECT * FROM review_item WHERE item_id = ?", (item_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def resolve_review_item(conn, item_id, status, *, resolved_by, note):
+    if status not in ("accepted", "rejected"):
+        raise ValueError(f"review items resolve to 'accepted' or 'rejected', not {status!r}")
+    conn.execute(
+        "UPDATE review_item SET status = ?, resolved_at = ?, resolved_by = ?, resolution_note = ? WHERE item_id = ?",
+        (status, utc_now(), resolved_by, note, item_id),
+    )
+
+
+def review_done_for_week(conn, week):
+    return conn.execute(
+        "SELECT 1 FROM llm_call WHERE stage = 'review' AND subject_key = ? AND status = 'succeeded'", (week,)
+    ).fetchone() is not None
 
 
 def get_canonical_topic_by_slug(conn, slug):
