@@ -14,6 +14,7 @@ def test_load_config_applies_defaults_when_omitted(tmp_path):
         "fetch_limit_per_subreddit": 100,
         "trend_window_weeks": 8,
         "extraction_cascade": False,
+        "topic_review": False,
     }
 
 
@@ -52,3 +53,9 @@ def test_load_config_reads_extraction_cascade(tmp_path):
     config_path = tmp_path / "config.yaml"
     config_path.write_text("subreddits:\n  - a\nextraction_cascade: true\n")
     assert load_config(str(config_path))["extraction_cascade"] is True
+
+
+def test_load_config_reads_topic_review(tmp_path):
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("subreddits:\n  - a\ntopic_review: true\n")
+    assert load_config(str(config_path))["topic_review"] is True

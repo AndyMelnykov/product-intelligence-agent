@@ -6,3 +6,6 @@ trend_window_weeks: 8
 # Cheap Haiku triage before extraction; it can only skip obvious noise. Off until you have read
 # the triage eval (python evals/run_triage_eval.py) and ADR 007.
 extraction_cascade: false
+# Weekly Claude Opus 5.5 review of new topics for suspected merges/splits (python review.py list).
+# The model only proposes; you accept or reject. Roughly one call a week.
+topic_review: false

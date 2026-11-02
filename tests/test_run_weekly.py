@@ -87,3 +87,19 @@ def test_run_all_passes_the_cascade_flag_to_extract(tmp_path, monkeypatch):
     run_weekly.run_all(config_path=str(config_path))
 
     assert seen["cascade"] is True
+
+
+def test_run_all_runs_review_only_when_enabled(tmp_path, monkeypatch):
+    calls = []
+    for stage in ("fetch", "extract", "match", "report", "materiality", "review"):
+        monkeypatch.setattr(getattr(run_weekly, stage), "run", lambda *a, _s=stage, **kw: calls.append(_s))
+
+    off = tmp_path / "off.yaml"
+    off.write_text("subreddits:\n  - sub1\n")
+    run_weekly.run_all(config_path=str(off))
+    assert "review" not in calls
+
+    on = tmp_path / "on.yaml"
+    on.write_text("subreddits:\n  - sub1\ntopic_review: true\n")
+    run_weekly.run_all(config_path=str(on))
+    assert calls[-1] == "review"

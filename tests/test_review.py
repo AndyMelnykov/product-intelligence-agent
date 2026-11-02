@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 import db
+import registry
 import review
 from llm import LLMReply
 
@@ -159,3 +160,82 @@ def test_run_with_nothing_new_makes_no_call(tmp_path):
     path = str(tmp_path / "pi.db")
     seed(path)
     assert review.run(db_path=path, today=date(2026, 9, 30), client=client()) == 0
+
+
+def stored(path, items):
+    review.run(db_path=path, today=TODAY, client=client(json.dumps(items)))
+    conn = db.connect(path)
+    return conn, db.get_review_items(conn, status="open")
+
+
+def test_accept_merges_the_topics_and_closes_the_item(tmp_path):
+    path = str(tmp_path / "pi.db")
+    old, new, _ = seed(path)
+    conn, [item] = stored(path, [merge_item(new, old)])
+
+    result = review.accept_item(conn, item["item_id"], week=WEEK, by="human:test")
+    conn.commit()
+
+    assert result["into"] == old
+    assert db.get_canonical_topic(conn, new)["status"] == "merged"
+    closed = db.get_review_item(conn, item["item_id"])
+    assert (closed["status"], closed["resolved_by"]) == ("accepted", "human:test")
+    lineage = db.get_lineage_for_topic(conn, new)[0]
+    assert f"review item {item['item_id']}" in lineage["decided_by"]
+
+
+def test_accept_refuses_splits_and_already_resolved_items(tmp_path):
+    path = str(tmp_path / "pi.db")
+    old, new, _ = seed(path)
+    conn, items = stored(path, [{"kind": "split", "topic_id": new, "reason": "two issues", "confidence": 0.7},
+                                merge_item(new, old)])
+    split_item, merge = items
+
+    with pytest.raises(review.ReviewError, match="registry.py split"):
+        review.accept_item(conn, split_item["item_id"], week=WEEK, by="h")
+    review.accept_item(conn, merge["item_id"], week=WEEK, by="h")
+    with pytest.raises(review.ReviewError, match="not open"):
+        review.accept_item(conn, merge["item_id"], week=WEEK, by="h")
+
+
+def test_accept_fails_cleanly_when_the_registry_changed(tmp_path):
+    path = str(tmp_path / "pi.db")
+    old, new, quiet = seed(path)
+    conn, [item] = stored(path, [merge_item(new, old)])
+    registry.merge_topics(conn, "night-theme", "exports", week=WEEK, reason="by hand", decided_by="h")
+    conn.commit()
+
+    with pytest.raises(registry.RegistryError):
+        review.accept_item(conn, item["item_id"], week=WEEK, by="h")
+    conn.rollback()
+
+    assert db.get_review_item(conn, item["item_id"])["status"] == "open"
+
+
+def test_cli_list_reject_and_done(tmp_path, capsys):
+    path = str(tmp_path / "pi.db")
+    old, new, _ = seed(path)
+    stored(path, [merge_item(new, old), {"kind": "split", "topic_id": new, "reason": "two", "confidence": 0.6}])
+    capsys.readouterr()
+
+    assert review.main(["--db-path", path, "list"]) == 0
+    listed = json.loads(capsys.readouterr().out)
+    assert [i["kind"] for i in listed] == ["merge", "split"]
+
+    assert review.main(["--db-path", path, "reject", str(listed[0]["item_id"]), "--reason", "different"]) == 0
+    assert review.main(["--db-path", path, "done", str(listed[1]["item_id"]), "--note", "split by hand"]) == 0
+    conn = db.connect(path)
+    assert [i["status"] for i in db.get_review_items(conn)] == ["rejected", "accepted"]
+
+
+def test_cli_accept_reports_registry_errors_with_exit_code_2(tmp_path, capsys):
+    path = str(tmp_path / "pi.db")
+    assert review.main(["--db-path", path, "accept", "999"]) == 2
+    assert "no review item" in capsys.readouterr().err
+
+
+def test_health_counts_open_review_items(tmp_path):
+    path = str(tmp_path / "pi.db")
+    old, new, _ = seed(path)
+    conn, _ = stored(path, [merge_item(new, old)])
+    assert db.pipeline_health(conn, max_match_attempts=3)["review_items_open"] == 1

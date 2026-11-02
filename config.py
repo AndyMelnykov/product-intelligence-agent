@@ -21,4 +21,5 @@ def load_config(path: str) -> dict:
         "fetch_limit_per_subreddit": raw.get("fetch_limit_per_subreddit", DEFAULT_FETCH_LIMIT),
         "trend_window_weeks": raw.get("trend_window_weeks", DEFAULT_TREND_WINDOW_WEEKS),
         "extraction_cascade": bool(raw.get("extraction_cascade", False)),
+        "topic_review": bool(raw.get("topic_review", False)),
     }
