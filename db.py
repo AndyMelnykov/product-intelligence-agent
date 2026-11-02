@@ -772,6 +772,7 @@ def pipeline_health(conn, *, max_match_attempts):
         "match_responses_unapplied": count(
             "SELECT COUNT(*) FROM llm_call WHERE stage = 'match' AND status = 'succeeded' AND applied_at IS NULL"),
         "events_unflushed": count("SELECT COUNT(*) FROM event_outbox WHERE emitted_at IS NULL"),
+        "review_items_open": count("SELECT COUNT(*) FROM review_item WHERE status = 'open'"),
     }
 
 

@@ -5,9 +5,10 @@ import fetch
 import match
 import materiality
 import report
+import review
 from config import load_config
 
-STAGES = ["fetch", "extract", "match", "report", "materiality"]
+STAGES = ["fetch", "extract", "match", "report", "materiality", "review"]
 
 
 def run_all(config_path="config.yaml", today=None):
@@ -17,6 +18,8 @@ def run_all(config_path="config.yaml", today=None):
     match.run(today=today)
     report.run(trend_window_weeks=config["trend_window_weeks"], today=today)
     materiality.run(trend_window_weeks=config["trend_window_weeks"], today=today)
+    if config["topic_review"]:
+        review.run(today=today)
 
 
 def main():
@@ -40,6 +43,8 @@ def main():
         report.run(trend_window_weeks=config["trend_window_weeks"])
     elif args.stage == "materiality":
         materiality.run(trend_window_weeks=config["trend_window_weeks"])
+    elif args.stage == "review":
+        review.run()
 
 
 if __name__ == "__main__":

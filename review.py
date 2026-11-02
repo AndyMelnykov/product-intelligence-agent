@@ -5,14 +5,17 @@ new or received feedback this week. Valid suggestions become review_item rows. T
 changes the registry: a human accepts a merge with `python review.py accept ID`, which calls
 registry.merge_topics, or splits a topic by hand with registry.py.
 """
+import argparse
 import json
 import math
+import sys
 from datetime import date
 
 import anthropic
 
 import db
 import ledger
+import registry
 import untrusted
 from credentials import get_secret
 from llm import reply_from_response
@@ -195,3 +198,82 @@ def run(db_path="data/pi_agent.db", today=None, client=None, force=False):
         return len(created)
     finally:
         conn.close()
+
+
+def accept_item(conn, item_id, *, week, by):
+    """Apply an open merge item through registry.merge_topics and close it. Does not commit:
+    the caller commits on success and rolls back on any error, so nothing is half-applied."""
+    item = db.get_review_item(conn, item_id)
+    if item is None:
+        raise ReviewError(f"no review item {item_id}")
+    if item["status"] != "open":
+        raise ReviewError(f"review item {item_id} is not open (status {item['status']})")
+    if item["kind"] != "merge":
+        topic = db.get_canonical_topic(conn, item["topic_id"])
+        raise ReviewError(
+            f"review item {item_id} is a split; split by hand with "
+            f"`python registry.py split {topic['slug'] if topic else item['topic_id']} --new-name ... --new-slug ... "
+            f"--description ... --candidates ... --reason ...`, then `python review.py done {item_id} --note ...`"
+        )
+    source, target = db.get_canonical_topic(conn, item["from_topic_id"]), db.get_canonical_topic(conn, item["into_topic_id"])
+    if source is None or target is None:
+        raise ReviewError(f"review item {item_id} names a topic that no longer exists")
+    result = registry.merge_topics(conn, source["slug"], target["slug"], week=week,
+                                   reason=f"review item {item_id}: {item['reason']}",
+                                   decided_by=f"{by} via review item {item_id}")
+    db.resolve_review_item(conn, item_id, "accepted", resolved_by=by, note=None)
+    return result
+
+
+def main(argv=None, client=None):
+    parser = argparse.ArgumentParser(description="The topic review queue: suspected merges and splits.")
+    parser.add_argument("--db-path", default="data/pi_agent.db")
+    sub = parser.add_subparsers(dest="command", required=True)
+    listing = sub.add_parser("list")
+    listing.add_argument("--status", default="open", choices=("open", "accepted", "rejected", "all"))
+    accept = sub.add_parser("accept", help="apply a merge item")
+    accept.add_argument("item_id", type=int)
+    accept.add_argument("--by", default="human:cli")
+    done = sub.add_parser("done", help="mark an item resolved by hand (e.g. after registry.py split)")
+    done.add_argument("item_id", type=int)
+    done.add_argument("--note", required=True)
+    done.add_argument("--by", default="human:cli")
+    reject = sub.add_parser("reject")
+    reject.add_argument("item_id", type=int)
+    reject.add_argument("--reason", required=True)
+    reject.add_argument("--by", default="human:cli")
+    run_parser = sub.add_parser("run", help="run this week's review now")
+    run_parser.add_argument("--force", action="store_true")
+    args = parser.parse_args(argv)
+    sys.stdout.reconfigure(errors="backslashreplace")
+
+    if args.command == "run":
+        run(db_path=args.db_path, client=client, force=args.force)
+        return 0
+
+    conn = db.connect(args.db_path)
+    db.init_db(conn)
+    try:
+        if args.command == "list":
+            print(json.dumps(db.get_review_items(conn, None if args.status == "all" else args.status), indent=2))
+        elif args.command == "accept":
+            print(json.dumps(accept_item(conn, args.item_id, week=iso_week_string(date.today()), by=args.by), indent=2))
+            conn.commit()
+        elif args.command in ("done", "reject"):
+            item = db.get_review_item(conn, args.item_id)
+            if item is None or item["status"] != "open":
+                raise ReviewError(f"no open review item {args.item_id}")
+            status, note = ("accepted", args.note) if args.command == "done" else ("rejected", args.reason)
+            db.resolve_review_item(conn, args.item_id, status, resolved_by=args.by, note=note)
+            conn.commit()
+    except (ReviewError, registry.RegistryError) as e:
+        conn.rollback()
+        print(e, file=sys.stderr)
+        return 2
+    finally:
+        conn.close()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -164,8 +164,8 @@ evidence (source data, immutable)
 
 ```text
 1. report.py's trend math (deterministic) says: new / rising / stable / falling
-2. materiality.py combines: signal-type impact class, trend, mentions this week,
-   average extraction confidence → a materiality label (low/medium/high/critical)
+2. materiality.py combines: signal-type impact class, trend, mentions this week
+   (minus near-duplicate posts; each cluster counts once), average extraction confidence → a materiality label (low/medium/high/critical)
 3. low/medium: topic and its mentions are just recorded — no event
 4. high/critical: a material_signal row is created and one line is appended to
    data/events.jsonl — this is the boundary this repo stops at (see below)
@@ -209,6 +209,12 @@ still worth stating explicitly:
   `python registry.py split SLUG --new-name ... --candidates ...`; history is kept (`python registry.py history SLUG`).
   The main failure mode here is the matching LLM call splitting one real topic into two, or merging two distinct
   ones (see Limitations)
+- suggested topic merges and splits (`python review.py list`). With `topic_review: true` a weekly Opus call
+  proposes them; nothing changes until you `accept`, `done` or `reject`.
+
+**Untrusted input.** Post text and model summaries derived from it are marked as data inside every prompt
+(ADR 008), and `evals/golden/extraction/prompt_injection.yaml` measures how well that holds. Near-duplicate
+posts in a topic-week count once toward materiality, and bursts of posts are named in the signal's reasons.
 
 **Requires approval:** none exist in this pipeline today — there's no operation here
 that writes externally or is hard to reverse.
@@ -290,6 +296,7 @@ pytest -v
 
 ## Limitations
 
+- **Coordination detection is text-only.** Without authors it can't spot many accounts posting different text in concert; it catches copy-paste and flags bursts.
 - **One process at a time.** Crash recovery assumes no other pipeline process is running against the same database.
 - **Reports use the latest registry.** After a merge, past weeks are reported under the surviving topic. Use `registry.py snapshot --week W` for the registry as it was.
 - **Extraction/matching quality is unmeasured.** No evaluation harness scores
