@@ -9,3 +9,8 @@ extraction_cascade: false
 # Weekly Claude Opus 5.5 review of new topics for suspected merges/splits (python review.py list).
 # The model only proposes; you accept or reject. Roughly one call a week.
 topic_review: false
+# Publish this week's material topics to a local TeamOSTemplate checkout (python run_weekly.py --stage publish).
+# Off until repo_path is set. Writes only through the checkout's scripts/signals/signals.py; never runs git.
+# teamos:
+#   repo_path: C:/Projects/ProductTeamOS/TeamOSTemplate
+#   max_signals_per_topic: 10
