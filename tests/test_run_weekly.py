@@ -1,5 +1,9 @@
 import sys
+from pathlib import Path
 
+import pytest
+
+import publish
 import run_weekly
 
 
@@ -103,3 +107,84 @@ def test_run_all_runs_review_only_when_enabled(tmp_path, monkeypatch):
     on.write_text("subreddits:\n  - sub1\ntopic_review: true\n")
     run_weekly.run_all(config_path=str(on))
     assert calls[-1] == "review"
+
+
+def _stub_stages(monkeypatch, calls):
+    for stage in ("fetch", "extract", "match", "report", "materiality", "review"):
+        monkeypatch.setattr(getattr(run_weekly, stage), "run", lambda *a, _s=stage, **kw: calls.append(_s))
+
+
+def test_run_all_skips_publish_without_teamos(tmp_path, monkeypatch, capsys):
+    calls = []
+    _stub_stages(monkeypatch, calls)
+
+    def fail(*a, **kw):
+        raise AssertionError("publish.run must not be called without a teamos section")
+
+    monkeypatch.setattr(publish, "run", fail)
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("subreddits:\n  - sub1\n", encoding="utf-8")
+
+    run_weekly.run_all(config_path=str(config_path))
+    publish_lines = [line for line in capsys.readouterr().out.splitlines() if "publish" in line]
+    assert publish_lines == ["publish: skipped (no teamos section in config)"]
+
+    monkeypatch.setattr(sys, "argv", ["run_weekly.py", "--stage", "all", "--config", str(config_path)])
+    run_weekly.main()
+
+
+def test_run_all_publishes_last_when_teamos_set(tmp_path, monkeypatch):
+    calls = []
+    _stub_stages(monkeypatch, calls)
+    seen = {}
+
+    def fake_publish(teamos, **kw):
+        calls.append("publish")
+        seen["teamos"] = teamos
+
+    monkeypatch.setattr(publish, "run", fake_publish)
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("subreddits:\n  - sub1\nteamos:\n  repo_path: X\n", encoding="utf-8")
+
+    run_weekly.run_all(config_path=str(config_path))
+
+    assert calls[-1] == "publish"
+    assert seen["teamos"] == {"repo_path": "X", "max_signals_per_topic": 10}
+
+
+def test_stage_publish_runs_only_publish(tmp_path, monkeypatch):
+    calls = []
+    _stub_stages(monkeypatch, calls)
+    monkeypatch.setattr(publish, "run", lambda *a, **kw: calls.append("publish"))
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("subreddits:\n  - sub1\nteamos:\n  repo_path: X\n", encoding="utf-8")
+
+    monkeypatch.setattr(sys, "argv", ["run_weekly.py", "--stage", "publish", "--config", str(config_path)])
+    run_weekly.main()
+
+    assert calls == ["publish"]
+
+
+def test_stage_publish_exits_nonzero_when_script_missing(tmp_path, monkeypatch):
+    repo = tmp_path / "empty-teamos"
+    repo.mkdir()
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(f"subreddits:\n  - sub1\nteamos:\n  repo_path: {repo.as_posix()}\n", encoding="utf-8")
+
+    monkeypatch.setattr(sys, "argv", ["run_weekly.py", "--stage", "publish", "--config", str(config_path)])
+    with pytest.raises(SystemExit) as exc:
+        run_weekly.main()
+
+    assert exc.value.code
+    assert str(Path(repo) / "scripts" / "signals" / "signals.py") in str(exc.value.code)
+
+
+def test_stage_publish_without_teamos_exits_nonzero(tmp_path, monkeypatch):
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("subreddits:\n  - sub1\n", encoding="utf-8")
+
+    monkeypatch.setattr(sys, "argv", ["run_weekly.py", "--stage", "publish", "--config", str(config_path)])
+    with pytest.raises(SystemExit) as exc:
+        run_weekly.main()
+
+    assert "teamos.repo_path" in str(exc.value.code)
