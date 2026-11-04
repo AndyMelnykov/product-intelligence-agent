@@ -8,6 +8,7 @@ flowchart TB
         REDDIT[("Reddit API")]
         CLAUDE[("Claude API")]
         KEYRING[("OS keyring")]
+        TOS[("TeamOSTemplate checkout<br/>signals.csv")]
     end
 
     subgraph ENTRY["Entry points"]
@@ -18,7 +19,7 @@ flowchart TB
 
     subgraph PIPE["Pipeline stages (run in order)"]
         direction LR
-        F["fetch<br/>collect evidence"] --> E["extract<br/>LLM: signal candidates"] --> M["match<br/>LLM: map to canonical topics"] --> R["report<br/>trend scoring"] --> MAT["materiality<br/>classify + emit"]
+        F["fetch<br/>collect evidence"] --> E["extract<br/>LLM: signal candidates"] --> M["match<br/>LLM: map to canonical topics"] --> R["report<br/>trend scoring"] --> MAT["materiality<br/>classify + emit"] --> PUB["publish<br/>signals.py add"]
     end
 
     subgraph CORE["Shared foundation"]
@@ -61,6 +62,8 @@ flowchart TB
     F & E & M --> CRED
     M & R & MAT --> WK
     MAT --> R
+    PUB -- read --> DB
+    PUB --> TOS
 
     DB --> SQL
     ST --> STF
@@ -81,7 +84,7 @@ flowchart TB
 
 ## Notes
 
-- The five pipeline stages share only SQLite. They don't call each other, except that `materiality` reuses `report`'s trend logic.
-- Only `extract` and `match` call Claude (ADR 001). Trend and materiality scoring are deterministic (ADR 003).
+- The five core pipeline stages, plus the optional `review` and `publish`, share only SQLite. They don't call each other, except that `materiality` reuses `report`'s trend logic.
+- Only `extract`, `match`, `triage` and `review` call Claude (ADR 001, 007, 008). Trend, materiality scoring and `publish` are deterministic (ADR 003, 009).
 - Evals import the production `extract` and `match` code, so they test the real prompts. `export_judge_cases` feeds saved runs back into the golden judge cases.
-- The pipeline's only external output is `data/events.jsonl`, written by `materiality` (ADR 004).
+- The pipeline's external outputs are `data/events.jsonl` (optional event feed, written by `materiality`, ADR 004) and the optional `publish` into a TeamOSTemplate checkout, which goes only through that checkout's `signals.py add` (ADR 009).

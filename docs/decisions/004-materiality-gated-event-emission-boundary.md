@@ -44,6 +44,7 @@ is emitted does not.
 - Nothing in this repo currently reads back its own `data/events.jsonl` — there is no
   consumer implemented yet. The event contract is speculative until a Strategic Signals
   Agent (or an equivalent consumer) actually exists.
+- Update: ADR 009 gives this event contract its first consumer path.
 - If a future requirement needs this repo to recommend a specific action rather than
   just "assess this," that's a deliberate scope change to flag and design for — not
   something to add quietly inside `materiality.py`.
