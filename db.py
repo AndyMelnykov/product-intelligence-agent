@@ -755,6 +755,22 @@ def get_candidates_for_topic(conn, topic_id):
     return [dict(r) for r in rows]
 
 
+def get_publishable_candidates(conn, topic_id):
+    """Candidates for a topic that may be published, newest post first. Read-only.
+
+    Excludes near-duplicate evidence and evidence the extractor or triage decided to skip."""
+    rows = conn.execute(
+        "SELECT sc.candidate_id, sc.signal_type, sc.summary, sc.evidence_id, e.source_url, "
+        "e.published_at, e.captured_at, e.title, e.content "
+        "FROM signal_candidate sc JOIN evidence e ON e.evidence_id = sc.evidence_id "
+        "LEFT JOIN evidence_extraction x ON x.evidence_id = e.evidence_id "
+        "WHERE sc.topic_id = ? AND e.duplicate_of IS NULL AND (x.status IS NULL OR x.status != 'skipped') "
+        "ORDER BY e.published_at DESC, sc.candidate_id DESC",
+        (topic_id,),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
 def pipeline_health(conn, *, max_match_attempts):
     def count(sql, params=()):
         return conn.execute(sql, params).fetchone()[0]
