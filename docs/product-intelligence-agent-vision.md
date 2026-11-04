@@ -18,7 +18,7 @@ Instead, it should answer:
 - What evidence supports it?
 - Is it potentially material enough to trigger deeper strategic investigation?
 
-Its main downstream consumer is the **Strategic Signals Agent**, which takes selected material signals and determines whether they represent a threat, opportunity, strategic watch item, or no-action event.
+Its main downstream consumer is the **Strategic Signals Agent**, which takes selected material signals and determines whether they represent a threat, opportunity, strategic watch item, or no-action event. In practice that role is filled by TeamOSTemplate's hypothesis layer (see [ADR 009](decisions/009-teamostemplate-is-the-consumer.md)).
 
 ---
 
@@ -67,6 +67,8 @@ This separation is intentional.
 The Product Intelligence Agent should remain an evidence system.
 
 The Strategic Signals Agent should remain a decision-preparation and response-management system.
+
+TeamOSTemplate's hypothesis layer fills this role; this repo hands it signals and never decides the response (ADR 009).
 
 ---
 
@@ -474,6 +476,26 @@ The Strategic Signals Agent receives the signal ID and retrieves full evidence t
 
 Do not duplicate all raw evidence inside the event.
 
+## 10.1 Publication to TeamOSTemplate
+
+The `publish` stage (ADR 009) is the first consumer path for this contract. It is optional and off until `teamos.repo_path` is set.
+
+**Behavior.** After materiality, `publish` reads the DB read-only and takes every topic with a `material_signal` row for the current ISO week. For each topic it selects the newest signal candidates whose evidence was captured that week, skips duplicates and posts triage skipped, and keeps at most `max_signals_per_topic` (default 10). It pipes the rows as JSON to the checkout's `scripts/signals/signals.py add`. It makes no model calls, writes nothing to the DB, never edits `signals.csv` itself, and never runs git. Re-running adds nothing, because `signals.py` skips an equal `(source_ref, summary)`.
+
+**Field mapping.**
+
+| `signals.csv` field | Source |
+|---|---|
+| `date` | `evidence.published_at`, date part |
+| `source_type` | always `community` |
+| `source_ref` | `evidence.source_url`; relative Reddit permalinks get `https://www.reddit.com` prefixed |
+| `summary` | candidate summary, usernames and emails scrubbed, whitespace collapsed, at most 300 characters |
+| `detail` | evidence title and content, scrubbed, at most 2000 characters |
+| `tags` | `<topic slug>;<signal_type>` |
+| `account` | omitted |
+
+Agent-internal ids (`EV-…`, `SC-…`, `SIG-…`) and authors are never published.
+
 ---
 
 # 11. Integration API
@@ -515,6 +537,8 @@ search_feedback(query, filters)
 ```
 
 These tools allow the Strategic Signals Agent to investigate without sharing storage internals.
+
+The API is still useful for drilling past the signals `publish` caps per topic, but it no longer blocks the hand-off to TeamOSTemplate.
 
 ---
 

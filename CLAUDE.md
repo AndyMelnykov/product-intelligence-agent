@@ -6,7 +6,8 @@ How this repo is run, for coding agents and for humans who want the short versio
 
 - Tests: `pytest`. No network or credentials; every LLM call in tests uses a fake client.
 - Lint: `ruff check .`
-- Pipeline: `python run_weekly.py [--stage fetch|extract|match|report|materiality]`
+- Pipeline: `python run_weekly.py [--stage fetch|extract|match|report|materiality|review|publish]`
+- `publish` writes to a TeamOSTemplate checkout only through its `signals.py add`. It never runs git and never edits `signals.csv` itself (ADR 009).
 - Evals call the real API, cost money and never run in CI. See README "Evals".
 
 ## Who designs what
