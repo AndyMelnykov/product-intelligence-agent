@@ -1,6 +1,13 @@
+import csv
 import json
-from datetime import datetime, timedelta, timezone
+import shutil
+import subprocess
+from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
 
+import pytest
+
+import config
 import db
 import publish
 
@@ -190,3 +197,161 @@ def test_none_title_and_content_are_safe(tmp_path):
     (row,) = publish.collect_signals(conn, WEEK, 10)
 
     assert row["detail"] == ""
+
+
+# --- run: hand rows to the TeamOSTemplate checkout's signals.py ---------------------------------
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+VENDORED_SCRIPT = REPO_ROOT / "tests" / "fixtures" / "teamos" / "scripts" / "signals" / "signals.py"
+TODAY = date(2026, 8, 15)
+
+
+def make_teamos_tree(tmp_path) -> Path:
+    root = tmp_path / "TeamOS"
+    script_dir = root / "scripts" / "signals"
+    script_dir.mkdir(parents=True)
+    shutil.copy(VENDORED_SCRIPT, script_dir / "signals.py")
+    store = root / "product-development" / "signals" / "signals.csv"
+    store.parent.mkdir(parents=True)
+    store.write_bytes(b"")
+    return root
+
+
+def read_signals(root) -> list[dict]:
+    path = Path(root) / "product-development" / "signals" / "signals.csv"
+    with open(path, "r", encoding="utf-8", newline="") as f:
+        return list(csv.DictReader(f))
+
+
+def teamos_config(root) -> dict:
+    return {"repo_path": str(root), "max_signals_per_topic": 10}
+
+
+def seeded_db(tmp_path, posts=3, **post_fields) -> str:
+    conn = open_db(tmp_path)
+    topic_id = add_topic(conn)
+    for i in range(posts):
+        add_post(conn, topic_id, i, **post_fields)
+    conn.commit()
+    conn.close()
+    return str(tmp_path / "pi_agent.db")
+
+
+def test_vendored_signals_py_matches_repo_path_when_configured():
+    config_path = REPO_ROOT / "config.yaml"
+    if not config_path.exists():
+        pytest.skip("no config.yaml")
+    teamos = config.load_config(str(config_path))["teamos"]
+    if teamos is None:
+        pytest.skip("config.yaml has no teamos section")
+    real = Path(teamos["repo_path"]) / publish.SIGNALS_SCRIPT
+    assert real.read_text(encoding="utf-8") == VENDORED_SCRIPT.read_text(encoding="utf-8"), (
+        f"tests/fixtures/teamos signals.py has drifted from {real}; re-copy the file"
+    )
+
+
+def test_publish_adds_community_rows_for_material_topic(tmp_path):
+    root = make_teamos_tree(tmp_path)
+    db_path = seeded_db(tmp_path)
+
+    result = publish.run(teamos_config(root), db_path=db_path, today=TODAY)
+
+    rows = read_signals(root)
+    assert len(rows) == 3
+    assert {r["source_type"] for r in rows} == {"community"}
+    assert all(r["source_ref"] for r in rows)
+    assert result["week"] == WEEK
+    assert result["written"] == result["selected"] == 3
+
+
+def test_second_publish_adds_nothing(tmp_path, capsys):
+    root = make_teamos_tree(tmp_path)
+    db_path = seeded_db(tmp_path)
+    publish.run(teamos_config(root), db_path=db_path, today=TODAY)
+    capsys.readouterr()
+
+    result = publish.run(teamos_config(root), db_path=db_path, today=TODAY)
+
+    assert len(read_signals(root)) == 3
+    assert result["written"] == 0
+    assert result["skipped"] == 3
+    assert "0 new" in capsys.readouterr().out
+
+
+def test_missing_signals_py_names_path_and_writes_nothing(tmp_path):
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    db_path = tmp_path / "never.db"
+
+    with pytest.raises(publish.PublishError) as excinfo:
+        publish.run(teamos_config(empty), db_path=str(db_path), today=TODAY)
+
+    assert str(empty / publish.SIGNALS_SCRIPT) in str(excinfo.value)
+    assert not db_path.exists()
+    assert not (empty / "product-development").exists()
+
+
+def test_only_signals_py_is_started(tmp_path, monkeypatch):
+    root = make_teamos_tree(tmp_path)
+    db_path = seeded_db(tmp_path)
+    real_run, calls = subprocess.run, []
+
+    def recording_run(argv, *args, **kwargs):
+        calls.append(list(argv))
+        return real_run(argv, *args, **kwargs)
+
+    monkeypatch.setattr(publish.subprocess, "run", recording_run)
+
+    publish.run(teamos_config(root), db_path=db_path, today=TODAY)
+
+    assert len(calls) == 1
+    assert calls[0][1].endswith("signals.py")
+    assert not any(Path(arg).name.lower() in ("git", "git.exe") for arg in calls[0])
+
+
+def test_nothing_material_starts_no_subprocess(tmp_path, monkeypatch, capsys):
+    root = make_teamos_tree(tmp_path)
+    conn = open_db(tmp_path)
+    add_post(conn, add_topic(conn, material=False), 0)
+    conn.commit()
+    conn.close()
+    calls = []
+    monkeypatch.setattr(publish.subprocess, "run", lambda *a, **k: calls.append(a))
+
+    result = publish.run(teamos_config(root), db_path=str(tmp_path / "pi_agent.db"), today=TODAY)
+
+    assert calls == []
+    assert result["selected"] == 0
+    assert "nothing to publish" in capsys.readouterr().out
+
+
+def test_non_ascii_text_survives_to_the_csv(tmp_path):
+    root = make_teamos_tree(tmp_path)
+    text = "dark mode 🌙 “quotes” 日本語"
+    db_path = seeded_db(tmp_path, posts=1, content=text)
+
+    publish.run(teamos_config(root), db_path=db_path, today=TODAY)
+
+    (row,) = read_signals(root)
+    assert text in row["detail"]
+
+
+def test_rejected_row_is_shown_and_exit_is_nonzero(tmp_path, capsys):
+    root = make_teamos_tree(tmp_path)
+    conn = open_db(tmp_path)
+    topic_id = add_topic(conn)
+    add_post(conn, topic_id, 0, source_url="")
+    add_post(conn, topic_id, 1, source_url="https://example.com/valid")
+    conn.commit()
+    conn.close()
+
+    with pytest.raises(publish.PublishError):
+        publish.run(teamos_config(root), db_path=str(tmp_path / "pi_agent.db"), today=TODAY)
+
+    assert [r["source_ref"] for r in read_signals(root)] == ["https://example.com/valid"]
+    assert "error: row" in capsys.readouterr().err
+
+
+def test_publish_without_teamos_raises():
+    with pytest.raises(publish.PublishError, match=r"teamos\.repo_path"):
+        publish.run(None)

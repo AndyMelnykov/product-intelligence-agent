@@ -1,5 +1,9 @@
+import json
 import re
+import subprocess
+import sys
 from datetime import date
+from pathlib import Path
 
 import db
 import weekutil
@@ -7,9 +11,11 @@ import weekutil
 SUMMARY_MAX = 300
 DETAIL_MAX = 2000
 REDDIT_ORIGIN = "https://www.reddit.com"
+SIGNALS_SCRIPT = Path("scripts/signals/signals.py")
 
 _USERNAME = re.compile(r"(?<![\w/])/?u/[A-Za-z0-9_-]+")
 _EMAIL = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
+_ADD_SUMMARY = re.compile(r"written: (.*); skipped duplicates: (\d+); invalid: (\d+)")
 
 
 class PublishError(Exception):
@@ -63,3 +69,60 @@ def collect_signals(conn, week: str, max_signals_per_topic: int) -> list[dict]:
         ]
         signals.extend(build_signal(c, topic["slug"]) for c in in_week[:max_signals_per_topic])
     return signals
+
+
+def run_signals_add(repo_path: str, rows: list[dict]) -> subprocess.CompletedProcess:
+    """The only subprocess publish starts. Rows go in as ASCII-only JSON so the child's stdin
+    code page (a console code page on Windows) cannot mangle emoji or curly quotes."""
+    script = Path(repo_path) / SIGNALS_SCRIPT
+    return subprocess.run(
+        [sys.executable, str(script), "add", "--json", "-", "--repo-root", repo_path],
+        input=json.dumps(rows), capture_output=True, text=True, encoding="utf-8", errors="replace",
+    )
+
+
+def _parse_add_summary(stdout: str) -> tuple[int | None, int | None, int | None]:
+    match = _ADD_SUMMARY.search(stdout)
+    if match is None:
+        return None, None, None
+    written = match.group(1).strip()
+    return (0 if written == "none" else len(written.split(",")), int(match.group(2)), int(match.group(3)))
+
+
+def run(teamos: dict | None, db_path: str = "data/pi_agent.db", today: date | None = None) -> dict:
+    if teamos is None:
+        raise PublishError("teamos is not configured: set teamos.repo_path in config.yaml")
+    script = Path(teamos["repo_path"]) / SIGNALS_SCRIPT
+    if not script.is_file():
+        raise PublishError(f"signals.py not found at {script}")
+
+    week = weekutil.iso_week_string(today or date.today())
+    conn = db.connect(db_path)
+    try:
+        db.init_db(conn)
+        rows = collect_signals(conn, week, teamos["max_signals_per_topic"])
+    finally:
+        conn.close()
+
+    result = {"week": week, "selected": len(rows), "written": 0, "skipped": 0, "invalid": 0}
+    if not rows:
+        print(f"publish: {week}: no material topics with publishable evidence, nothing to publish")
+        return result
+
+    proc = run_signals_add(teamos["repo_path"], rows)
+    if proc.stdout.strip():
+        print(proc.stdout.rstrip())
+    if proc.stderr.strip():
+        print(proc.stderr.rstrip(), file=sys.stderr)
+
+    written, skipped, invalid = _parse_add_summary(proc.stdout)
+    result.update(written=written, skipped=skipped, invalid=invalid)
+    if written is None:
+        print(f"publish: {week}: {len(rows)} selected, counts unknown (could not read signals.py output)")
+    else:
+        print(f"publish: {week}: {len(rows)} selected, {written} new, {skipped} already published, {invalid} invalid")
+        print("publish: next: review the diff of signals.csv in TeamOSTemplate; "
+              "attach new signals to a hypothesis with /hypothesis")
+    if proc.returncode != 0:
+        raise PublishError(f"signals.py add exited with code {proc.returncode}")
+    return result
