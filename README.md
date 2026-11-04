@@ -43,6 +43,9 @@ A weekly pipeline that:
    fading, as structured JSON/CSV you can feed into your own tools.
 5. **Flags what matters** — scores each topic's materiality (low/medium/high/critical)
    and emits a `material_signal` event only for the ones worth a human's attention.
+6. **Publishes** (optional) — hands each week's material topics to a local
+   [TeamOSTemplate](docs/decisions/009-teamostemplate-is-the-consumer.md) checkout as
+   evidence-backed signals, where a human attaches them to hypotheses.
 
 The result is an ongoing, low-effort read on what your product's community actually cares
 about, instead of anecdotal impressions from whichever thread you happened to see.
@@ -96,9 +99,9 @@ same trace is exercised by `tests/test_end_to_end.py` against fixture data.
 
 ## Architecture
 
-Five independent pipeline stages chained by a single entrypoint, backed by a SQLite
-database (`data/pi_agent.db`) instead of flat JSON files. Each stage is a plain Python
-module and can also be run standalone.
+Five core stages, plus optional `review` and `publish`, chained by a single entrypoint,
+backed by a SQLite database (`data/pi_agent.db`) instead of flat JSON files. Each stage is
+a plain Python module and can also be run standalone.
 
 ```text
 run_weekly.py
@@ -107,6 +110,7 @@ run_weekly.py
   └─> match.py        → canonical_topic + topic_weekly_mentions tables
   └─> report.py       → data/reports/<week>.json, data/reports/<week>.csv
   └─> materiality.py  → material_signal table, data/events.jsonl
+  └─> publish.py      → TeamOSTemplate signals.csv (optional)
 ```
 
 - **fetch.py** — pulls new posts per subreddit via PRAW (official Reddit API wrapper),
@@ -124,6 +128,9 @@ run_weekly.py
   high / critical) from its trend, volume, confidence, and signal type; `high`/`critical`
   topics get a `material_signal` row and a `product_intelligence.signal.material` event
   appended to `data/events.jsonl`.
+- **publish.py** — optional. Reads this week's material topics from the database (read-only)
+  and pipes one signal per evidence-backed candidate to a TeamOSTemplate checkout's
+  `signals.py add`. No model calls, no database writes, no git.
 - **registry.py** — merge, split, history and as-of snapshots of the canonical topic registry (human operations).
 - **ledger.py** — records every model call before and after it is made.
 - **llm.py** — reads model responses the same way everywhere.
@@ -140,7 +147,8 @@ evidence (source data, immutable)
        └─ Claude matches → canonical_topic + weekly mentions (model extraction)
             └─ report.py       → trend (deterministic)
                  └─ materiality.py → material_signal (deterministic rule table)
-                      └─ downstream: human product decision (outside this repo)
+                      └─ publish.py → TeamOSTemplate signals (optional)
+                           └─ downstream: hypotheses and the human product decision, in TeamOSTemplate
 ```
 
 ## Core workflows
@@ -168,7 +176,21 @@ evidence (source data, immutable)
    (minus near-duplicate posts; each cluster counts once), average extraction confidence → a materiality label (low/medium/high/critical)
 3. low/medium: topic and its mentions are just recorded — no event
 4. high/critical: a material_signal row is created and one line is appended to
-   data/events.jsonl — this is the boundary this repo stops at (see below)
+   data/events.jsonl — this is the boundary of the core pipeline (see below)
+```
+
+**Publication to TeamOSTemplate, per week (optional, `teamos` section in `config.yaml`):**
+
+```text
+1. publish.py takes every topic with a material_signal row this week
+2. Per topic it selects signal candidates captured this week, newest first, skipping
+   near-duplicates and posts extraction skipped, up to max_signals_per_topic (default 10)
+3. Each becomes one signal: source_type "community", the post's URL as source_ref, the
+   candidate summary, the post text as detail. u/names and emails are replaced and
+   agent-internal ids are never written
+4. The rows go to <repo_path>/scripts/signals/signals.py add; it validates them and
+   skips any it already has, so re-running is harmless
+5. Nothing else is touched: publish never runs git and never edits signals.csv itself
 ```
 
 ## AI design decisions
@@ -179,19 +201,20 @@ evidence (source data, immutable)
 | Topic matching | LLM does the semantic matching against a small registry passed inline, not vector search | The registry is small and precisely keyed by slug; "is this the same topic" is a genuinely fuzzy judgment better suited to an LLM call than nearest-neighbor search over embeddings |
 | Trend calculation | Deterministic weighted-average threshold logic in `report.py` | Canonical mention counts and trend direction must be reproducible and auditable — the LLM should never compute them |
 | Materiality scoring | Deterministic rule table in `materiality.py` (signal-type impact class × confidence × trend × mention count) | The same signal type and evidence must always produce the same materiality label; a categorical rule table avoids the "fake mathematical precision" of an LLM-generated score |
-| Writes | Fully autonomous for local storage (SQLite, JSONL); no writes ever leave the local system | The pipeline only reads Reddit and writes to its own database/files — there is no external side effect that would need human approval |
+| Writes | Fully autonomous for local storage (SQLite, JSONL), plus an optional write into a local TeamOSTemplate checkout through its `signals.py add` CLI | The pipeline only reads Reddit. The one write outside this repo goes through the other repo's validating CLI, is off by default, and is never committed or pushed (ADR 009) |
 | Durability | Effect sandwich per model call, recorded in an llm_call ledger | A crash loses at most one call; skips and failures are outcomes, not retries (ADR 005) |
 | Cost | Optional Haiku triage that can only skip, behind extraction_cascade | ~20x cheaper per token on noise; fails open; false-skip rate measured on golden data and a 5% production audit (ADR 007) |
-| Downstream handoff | Emit a `product_intelligence.signal.material` event and stop; don't decide what to do about it | Keeps this repo an evidence system — interpreting a signal and deciding a response belongs to the (separate, not-yet-built) Strategic Signals Agent |
+| Downstream handoff | Publish material topics to TeamOSTemplate as signals; `events.jsonl` stays as an optional event feed. Don't decide what to do about them | Keeps this repo an evidence system — interpreting a signal and deciding a response belongs to TeamOSTemplate's hypothesis layer (ADR 009) |
 
 See [docs/decisions/](docs/decisions/) for the fuller reasoning and alternatives
 considered behind each of these.
 
 ## Safety / trust model
 
-This pipeline has no external write path — it never posts to Reddit, calls no API with
-side effects, and never auto-executes a recommendation. The human-agent boundary is
-still worth stating explicitly:
+This pipeline never posts to Reddit, calls no API with side effects, and never
+auto-executes a recommendation. Its only write outside this repo is the optional `publish`
+stage, which adds rows to a local TeamOSTemplate checkout through that checkout's own
+`signals.py add`. The human-agent boundary is still worth stating explicitly:
 
 **Autonomous (no human in the loop):**
 
@@ -200,6 +223,8 @@ still worth stating explicitly:
 - matching candidates against canonical topics, or creating new ones
 - computing trend and materiality
 - writing to the local SQLite database and appending to `data/events.jsonl`
+- when `teamos.repo_path` is set: calling `signals.py add` in that checkout to append this
+  week's material signals to its `signals.csv`
 
 **Requires review before acting on it:**
 
@@ -211,16 +236,20 @@ still worth stating explicitly:
   ones (see Limitations)
 - suggested topic merges and splits (`python review.py list`). With `topic_review: true` a weekly Opus call
   proposes them; nothing changes until you `accept`, `done` or `reject`.
+- the `signals.csv` diff `publish` leaves in the TeamOSTemplate working tree. Committing it, and
+  attaching the new signals to hypotheses, is a human step.
 
 **Untrusted input.** Post text and model summaries derived from it are marked as data inside every prompt
 (ADR 008), and `evals/golden/extraction/prompt_injection.yaml` measures how well that holds. Near-duplicate
 posts in a topic-week count once toward materiality, and bursts of posts are named in the signal's reasons.
 
-**Requires approval:** none exist in this pipeline today — there's no operation here
-that writes externally or is hard to reverse.
+**Requires approval:** nothing in the pipeline asks first, because nothing it does is hard
+to reverse. `publish` writes into a local checkout of another repo via its CLI and never
+commits or pushes; reviewing the `signals.csv` diff and committing it is a human step.
 
 **Blocked:** the pipeline holds only read-only Reddit API scopes and local file/DB
-write access; there is nothing destructive or privileged for it to do.
+write access. `publish` never runs git, never edits `signals.csv` itself, and never
+imports TeamOSTemplate code; the only process it starts is `signals.py add`.
 
 ## Context strategy
 
@@ -280,6 +309,9 @@ after the fact.
 6. Run a single stage (e.g. after fixing a bug in matching, without re-fetching):
    `python run_weekly.py --stage match`
 7. Optional: set `extraction_cascade: true` in `config.yaml` after reading ADR 007.
+8. Optional: publish material topics to a local TeamOSTemplate checkout. Set
+   `teamos.repo_path` in `config.yaml` (see `config.yaml.example`), then run
+   `python run_weekly.py --stage publish`. With the section set, a full run publishes last.
 
 For a fully detailed, click-by-click walkthrough (creating the Reddit/Anthropic API
 keys, saving them into Windows Credential Manager, verifying each step, and
@@ -322,8 +354,9 @@ pytest -v
 - **No scheduled or event-driven execution.** The pipeline only runs when manually
   invoked (`run_weekly.py`, or an OS task scheduler calling it) — there's no built-in
   scheduler or webhook-triggered mode.
-- **No Integration API.** Downstream consumers (like a Strategic Signals Agent) would
-  need `get_signal`/`get_evidence`/`search_related_signals`/`get_topic_trend` tools; today
+- **No Integration API.** `publish` hands TeamOSTemplate at most `max_signals_per_topic`
+  signals per topic. Drilling past that cap would need
+  `get_signal`/`get_evidence`/`search_related_signals`/`get_topic_trend` tools; today
   the only access path is `query.py` or direct SQLite reads.
 - **No natural-language query interface.** Ad hoc questions ("what's rising fastest?")
   require hand-written SQL via `query.py`, not a conversational interface.
@@ -337,7 +370,8 @@ This repo implements a slice of a larger product-intelligence-agent vision — s
 
 **Implemented:** Reddit ingestion, customer-market signal extraction (with optional
 entity/effective-date capture), canonical topic matching, deterministic trend detection,
-and materiality-gated event emission.
+materiality-gated event emission, and an optional `publish` stage that hands material
+topics to TeamOSTemplate (ADR 009).
 
 **Next, in rough priority order** (matches the phased roadmap in
 [the gap-analysis doc](docs/product-intelligence-agent-gap-analysis.md)):
@@ -359,9 +393,9 @@ and materiality-gated event emission.
   the 4 states `report.py` already computes). Why: small and purely deterministic, but
   needed before trend output matches the vision's full state machine.
 - **Integration API / MCP toolset** (`get_signal`, `get_evidence`,
-  `search_related_signals`, `get_topic_trend`, `search_feedback`). Why: a Strategic
-  Signals Agent needs a way to retrieve full evidence without depending on this repo's
-  storage internals.
+  `search_related_signals`, `get_topic_trend`, `search_feedback`). Why: a consumer needs a
+  way to retrieve full evidence past the capped signals `publish` hands over, without
+  depending on this repo's storage internals.
 - **Scheduled/event-driven launch modes.** Why: a real deployment needs the pipeline
   running on its own cadence, not only when someone remembers to invoke it.
 - **Natural-language query interface.** Why: source-backed answers to ad hoc questions
