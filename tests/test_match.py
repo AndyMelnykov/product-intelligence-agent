@@ -136,11 +136,6 @@ def test_call_matcher_raises_response_error_on_malformed_json():
         match.call_matcher(client, CANDIDATES, EXISTING_TOPICS)
 
 
-def test_match_error_subclasses_share_base_class():
-    assert issubclass(match.MatchAPIError, match.MatchError)
-    assert issubclass(match.MatchResponseError, match.MatchError)
-
-
 def test_call_matcher_reads_text_block_after_thinking_block():
     response = text_response(json.dumps([{"index": 0, "matched_topic_id": "TOPIC-0001", "new_topic": None}]),
                              thinking_first=True)

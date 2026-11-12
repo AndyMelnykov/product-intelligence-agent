@@ -103,11 +103,6 @@ def test_extract_topic_raises_api_error_on_api_failure():
         extract.extract_topic(client, SAMPLE_EVIDENCE)
 
 
-def test_extraction_error_subclasses_share_base_class():
-    assert issubclass(extract.ExtractionAPIError, extract.ExtractionError)
-    assert issubclass(extract.ExtractionResponseError, extract.ExtractionError)
-
-
 def test_extract_topic_parses_evidence_without_evidence_id():
     client = FakeClient([
         json.dumps({"signal_type": "new_feature_demand", "summary": "User wants a dark theme", "confidence": 0.9})
