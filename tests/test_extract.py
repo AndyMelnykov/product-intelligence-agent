@@ -8,42 +8,8 @@ import db
 import extract
 import ledger
 import triage as triage_module
-
-
-class FakeContentBlock:
-    type = "text"
-
-    def __init__(self, text):
-        self.text = text
-
-
-class FakeResponse:
-    def __init__(self, text):
-        self.content = [FakeContentBlock(text)]
-
-
-class FakeMessages:
-    def __init__(self, responses):
-        self._responses = list(responses)
-
-    def create(self, **kwargs):
-        result = self._responses.pop(0)
-        if isinstance(result, Exception):
-            raise result
-        if isinstance(result, FakeResponse):
-            return result
-        return FakeResponse(result)
-
-
-class FakeClient:
-    def __init__(self, responses):
-        self.messages = FakeMessages(responses)
-
-
-class FakeThinkingBlock:
-    type = "thinking"
-    thinking = ""
-
+from anthropic_fake import FakeAnthropic as FakeClient
+from anthropic_fake import checked, text_response
 
 SAMPLE_EVIDENCE = {
     "evidence_id": "EV-2026-000001",
@@ -227,10 +193,9 @@ def test_run_persists_entity_and_effective_date_from_extraction(tmp_path):
 
 
 def test_extract_topic_reads_text_block_after_thinking_block():
-    response = FakeResponse(json.dumps(
+    response = text_response(json.dumps(
         {"signal_type": "new_feature_demand", "summary": "User wants a dark theme", "confidence": 0.9}
-    ))
-    response.content.insert(0, FakeThinkingBlock())
+    ), thinking_first=True)
     client = FakeClient([response])
 
     result = extract.extract_topic(client, SAMPLE_EVIDENCE)
@@ -239,8 +204,8 @@ def test_extract_topic_reads_text_block_after_thinking_block():
 
 
 def test_extract_topic_raises_response_error_when_no_text_block():
-    response = FakeResponse("unused")
-    response.content = [FakeThinkingBlock()]
+    response = text_response("unused", thinking_first=True)
+    response.content.pop()  # leave only the thinking block
     client = FakeClient([response])
 
     with pytest.raises(extract.ExtractionResponseError, match="no text block"):
@@ -276,7 +241,7 @@ class CrashOnCall:
         self.calls += 1
         if self.calls == self._crash_on:
             raise SimulatedCrash()
-        return FakeResponse(self._responses.pop(0))
+        return text_response(self._responses.pop(0))
 
 
 def _seed(tmp_path, n=1, **overrides):
@@ -366,7 +331,7 @@ def test_run_stops_after_consecutive_api_errors_without_burning_attempts(tmp_pat
 def test_crash_keeps_completed_rows_and_retries_only_the_interrupted_one(tmp_path):
     db_path, ids = _seed(tmp_path, n=3)
     crashing = FakeClient([])
-    crashing.messages = CrashOnCall([VALID], crash_on=2)
+    crashing.messages = checked(CrashOnCall([VALID], crash_on=2))
 
     with pytest.raises(SimulatedCrash):
         extract.run(db_path=db_path, client=crashing)
@@ -460,12 +425,12 @@ class CapturingMessages:
 
     def create(self, **kwargs):
         self.kwargs = kwargs
-        return FakeResponse(self.text)
+        return text_response(self.text)
 
 
 def test_request_extraction_sends_effort_only_when_configured(monkeypatch):
     client = FakeClient([])
-    client.messages = CapturingMessages(VALID)
+    client.messages = checked(CapturingMessages(VALID))
 
     extract.request_extraction(client, SAMPLE_EVIDENCE)
     assert "output_config" not in client.messages.kwargs
@@ -492,12 +457,12 @@ class ByModel:
         result = queue.pop(0)
         if isinstance(result, Exception):
             raise result
-        return FakeResponse(result)
+        return text_response(result)
 
 
 def by_model(triage_answers, extraction_answers):
     client = FakeClient([])
-    client.messages = ByModel(triage_answers, extraction_answers)
+    client.messages = checked(ByModel(triage_answers, extraction_answers))
     return client
 
 

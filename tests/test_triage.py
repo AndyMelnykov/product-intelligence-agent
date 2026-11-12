@@ -3,37 +3,8 @@ import json
 import pytest
 
 import triage
+from anthropic_fake import FakeAnthropic
 from llm import LLMReply
-
-
-class Text:
-    type = "text"
-
-    def __init__(self, text):
-        self.text = text
-
-
-class Response:
-    stop_reason = "end_turn"
-
-    def __init__(self, text):
-        self.content = [Text(text)]
-
-
-class Messages:
-    def __init__(self, result):
-        self.result, self.kwargs = result, None
-
-    def create(self, **kwargs):
-        self.kwargs = kwargs
-        if isinstance(self.result, Exception):
-            raise self.result
-        return Response(self.result)
-
-
-class Client:
-    def __init__(self, result):
-        self.messages = Messages(result)
 
 
 EVIDENCE = {"evidence_id": "EV-2026-000001", "title": "Buy followers cheap!!!", "content": "DM me"}
@@ -44,12 +15,12 @@ def reply(text):
 
 
 def test_request_uses_haiku_at_low_effort_and_the_post_text():
-    client = Client(json.dumps({"route": "skip", "confidence": 0.97, "reason": "spam"}))
+    client = FakeAnthropic([json.dumps({"route": "skip", "confidence": 0.97, "reason": "spam"})])
 
     decision = triage.triage(client, EVIDENCE)
 
     assert decision == triage.TriageDecision("skip", 0.97, "spam")
-    sent = client.messages.kwargs
+    [sent] = client.calls
     assert sent["model"] == "claude-haiku-5-5"
     assert sent["output_config"] == {"effort": "low"}
     assert "thinking" not in sent and "budget_tokens" not in json.dumps(sent)
@@ -58,7 +29,7 @@ def test_request_uses_haiku_at_low_effort_and_the_post_text():
 
 def test_api_failure_is_a_triage_api_error():
     with pytest.raises(triage.TriageAPIError):
-        triage.triage(Client(RuntimeError("529")), EVIDENCE)
+        triage.triage(FakeAnthropic([RuntimeError("529")]), EVIDENCE)
 
 
 @pytest.mark.parametrize("text", [

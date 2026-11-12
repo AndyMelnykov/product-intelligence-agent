@@ -4,6 +4,8 @@ import textwrap
 
 import pytest
 
+from anthropic_fake import FakeAnthropic as FakeClient
+from anthropic_fake import text_response
 from evals import harness
 
 
@@ -231,38 +233,6 @@ def test_filter_examples_by_matching_scenario_name(tmp_path):
 
     assert [s.name for s in harness.filter_examples(scenarios, "pooling")] == ["pooling"]
     assert harness.filter_examples(scenarios, "file_stem_differs") == []
-
-
-# --- fakes (repo FakeClient pattern; blocks carry a type because production reads the text block) ---
-
-class FakeContentBlock:
-    type = "text"
-
-    def __init__(self, text):
-        self.text = text
-
-
-class FakeResponse:
-    stop_reason = "end_turn"
-
-    def __init__(self, text):
-        self.content = [FakeContentBlock(text)]
-
-
-class FakeMessages:
-    def __init__(self, responses):
-        self._responses = list(responses)
-
-    def create(self, **kwargs):
-        result = self._responses.pop(0)
-        if isinstance(result, Exception):
-            raise result
-        return FakeResponse(result)
-
-
-class FakeClient:
-    def __init__(self, responses):
-        self.messages = FakeMessages(responses)
 
 
 # --- extraction grading ---
@@ -779,10 +749,9 @@ def cal_result(confidence, correct, status="passed"):
 
 
 def test_grade_extraction_records_confidence_and_tokens():
-    response = FakeResponse(extraction_response(confidence=0.72))
+    response = text_response(extraction_response(confidence=0.72))
     response.usage = Usage()
-    client = FakeClient([])
-    client.messages.create = lambda **kw: response if not kw["model"].startswith("claude-opus") else FakeResponse(JUDGE_PASS)
+    client = FakeClient([response, JUDGE_PASS])  # extraction first, then the judge
 
     result = harness.grade_extraction_example(EXAMPLE, client)
 

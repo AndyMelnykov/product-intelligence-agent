@@ -7,41 +7,8 @@ import db
 import ledger
 import match
 import registry
-
-
-class FakeContentBlock:
-    type = "text"
-
-    def __init__(self, text):
-        self.text = text
-
-
-class FakeResponse:
-    def __init__(self, text):
-        self.content = [FakeContentBlock(text)]
-
-
-class FakeMessages:
-    def __init__(self, responses):
-        self._responses = list(responses)
-
-    def create(self, **kwargs):
-        result = self._responses.pop(0)
-        if isinstance(result, Exception):
-            raise result
-        if isinstance(result, FakeResponse):
-            return result
-        return FakeResponse(result)
-
-
-class FakeClient:
-    def __init__(self, responses):
-        self.messages = FakeMessages(responses)
-
-
-class FakeThinkingBlock:
-    type = "thinking"
-    thinking = ""
+from anthropic_fake import FakeAnthropic as FakeClient
+from anthropic_fake import text_response
 
 
 EXISTING_TOPICS = [
@@ -175,8 +142,8 @@ def test_match_error_subclasses_share_base_class():
 
 
 def test_call_matcher_reads_text_block_after_thinking_block():
-    response = FakeResponse(json.dumps([{"index": 0, "matched_topic_id": "TOPIC-0001", "new_topic": None}]))
-    response.content.insert(0, FakeThinkingBlock())
+    response = text_response(json.dumps([{"index": 0, "matched_topic_id": "TOPIC-0001", "new_topic": None}]),
+                             thinking_first=True)
     client = FakeClient([response])
 
     decisions = match.call_matcher(client, CANDIDATES, EXISTING_TOPICS)
@@ -185,8 +152,8 @@ def test_call_matcher_reads_text_block_after_thinking_block():
 
 
 def test_call_matcher_raises_response_error_when_no_text_block():
-    response = FakeResponse("unused")
-    response.content = [FakeThinkingBlock()]
+    response = text_response("unused", thinking_first=True)
+    response.content.pop()  # leave only the thinking block
     client = FakeClient([response])
 
     with pytest.raises(match.MatchResponseError, match="no text block"):
@@ -268,22 +235,6 @@ class SimulatedCrash(BaseException):
     pass
 
 
-class RecordingMessages(FakeMessages):
-    def __init__(self, responses):
-        super().__init__(responses)
-        self.prompts = []
-
-    def create(self, **kwargs):
-        self.prompts.append(kwargs["messages"][0]["content"])
-        return super().create(**kwargs)
-
-
-def recording_client(responses):
-    client = FakeClient([])
-    client.messages = RecordingMessages(responses)
-    return client
-
-
 def test_run_stores_the_response_before_applying_and_marks_it_applied(tmp_path):
     conn = seed_db(tmp_path)
     seed_candidate(conn, "User wants CSV export")
@@ -335,13 +286,14 @@ def test_retry_round_sends_only_the_candidates_that_failed(tmp_path):
     conn.close()
     first = json.dumps([{"index": 0, "matched_topic_id": topic_id}, {"index": 1, "matched_topic_id": "TOPIC-9999"}])
     retry = json.dumps([{"index": 0, "matched_topic_id": topic_id}])
-    client = recording_client([first, retry])
+    client = FakeClient([first, retry])
 
     match.run(db_path=str(tmp_path / "pi_agent.db"), today=date(2026, 8, 15), client=client)
 
-    assert len(client.messages.prompts) == 2
-    assert "dark mode again" not in client.messages.prompts[1]
-    assert "unclear one" in client.messages.prompts[1]
+    prompts = [call["messages"][0]["content"] for call in client.calls]
+    assert len(prompts) == 2
+    assert "dark mode again" not in prompts[1]
+    assert "unclear one" in prompts[1]
     conn = db.connect(str(tmp_path / "pi_agent.db"))
     assert db.get_candidates_without_topic(conn) == []
 

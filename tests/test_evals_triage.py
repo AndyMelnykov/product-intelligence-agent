@@ -1,20 +1,7 @@
 import json
 
 from evals import harness, run_triage_eval, runs, triage_eval
-
-
-class Text:
-    type = "text"
-
-    def __init__(self, text):
-        self.text = text
-
-
-class Response:
-    stop_reason = "end_turn"
-
-    def __init__(self, text):
-        self.content = [Text(text)]
+from anthropic_fake import checked, text_response
 
 
 class Repeating:
@@ -22,12 +9,12 @@ class Repeating:
         self.text = text
 
     def create(self, **kwargs):
-        return Response(self.text)
+        return text_response(self.text)
 
 
 class Client:
     def __init__(self, text):
-        self.messages = Repeating(text)
+        self.messages = checked(Repeating(text))
 
 
 def example(example_id, skip):
