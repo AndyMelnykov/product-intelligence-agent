@@ -5,39 +5,12 @@ import yaml
 
 import extract
 import match
+from anthropic_fake import FakeAnthropic as FakeClient
+from anthropic_fake import checked, text_response
 from evals import (
     compare_runs, export_judge_cases, harness, judge, paraphrase, run_extraction_eval, run_judge_eval,
     run_matching_eval, run_oracle_eval, runs,
 )
-
-
-class FakeContentBlock:
-    type = "text"
-
-    def __init__(self, text):
-        self.text = text
-
-
-class FakeResponse:
-    def __init__(self, text):
-        self.content = [FakeContentBlock(text)]
-        self.stop_reason = "end_turn"
-
-
-class FakeMessages:
-    def __init__(self, responses):
-        self._responses = list(responses)
-
-    def create(self, **kwargs):
-        result = self._responses.pop(0)
-        if isinstance(result, Exception):
-            raise result
-        return FakeResponse(result)
-
-
-class FakeClient:
-    def __init__(self, responses):
-        self.messages = FakeMessages(responses)
 
 
 class RepeatingMessages:
@@ -47,14 +20,14 @@ class RepeatingMessages:
     def create(self, **kwargs):
         if isinstance(self._result, Exception):
             raise self._result
-        return FakeResponse(self._result)
+        return text_response(self._result)
 
 
 class RepeatingClient:
     """Answers every call with the same text, or raises the same exception, however many calls a run makes."""
 
     def __init__(self, result):
-        self.messages = RepeatingMessages(result)
+        self.messages = checked(RepeatingMessages(result))
 
 
 MATCH_OK = json.dumps([{"index": 0, "matched_topic_id": "TOPIC-0001", "new_topic": None}])
@@ -285,13 +258,13 @@ class Routing:
     def create(self, **kwargs):
         prompt = kwargs["messages"][0]["content"]
         if prompt.startswith("Rewrite the Reddit post"):
-            return FakeResponse(json.dumps([{"title": "p1", "content": "c"}, {"title": "p2", "content": "c"}]))
-        return FakeResponse(json.dumps({"signal_type": "reliability_issue", "summary": "s", "confidence": 0.9}))
+            return text_response(json.dumps([{"title": "p1", "content": "c"}, {"title": "p2", "content": "c"}]))
+        return text_response(json.dumps({"signal_type": "reliability_issue", "summary": "s", "confidence": 0.9}))
 
 
 class RoutingClient:
     def __init__(self):
-        self.messages = Routing()
+        self.messages = checked(Routing())
 
 
 def test_oracle_extraction_without_cached_paraphrases_exits_2_and_spends_nothing(tmp_path, capsys):
@@ -339,7 +312,7 @@ def test_extraction_runner_effort_flag_is_applied_and_recorded(tmp_path, monkeyp
             return super().create(**kwargs)
 
     client = RepeatingClient(json.dumps({"skip": True}))
-    client.messages = Capturing(json.dumps({"skip": True}))
+    client.messages = checked(Capturing(json.dumps({"skip": True})))
     monkeypatch.setattr(extract, "EXTRACTION_EFFORT", None)
 
     code = run_extraction_eval.main(["--filter", "database_development", "--effort", "low",

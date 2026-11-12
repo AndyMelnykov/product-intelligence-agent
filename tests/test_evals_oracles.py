@@ -4,23 +4,10 @@ import re
 import pytest
 
 from evals import harness, oracles, paraphrase
+from anthropic_fake import checked, text_response
 
 CANDIDATE_RE = re.compile(r'"index": (\d+),\s*"signal_type": "[^"]*",\s*"summary": "([^"]*)"')
 TOPIC_RE = re.compile(r'"topic_id": "([^"]+)",\s*"name": "([^"]+)"')
-
-
-class Text:
-    type = "text"
-
-    def __init__(self, text):
-        self.text = text
-
-
-class Response:
-    stop_reason = "end_turn"
-
-    def __init__(self, text):
-        self.content = [Text(text)]
 
 
 class ScriptedMatcher:
@@ -43,12 +30,12 @@ class ScriptedMatcher:
             else:
                 decisions.append({"index": int(index), "matched_topic_id": None,
                                   "new_topic": {"name": value, "slug": value.lower().replace(" ", "-"), "description": value}})
-        return Response(json.dumps(decisions))
+        return text_response(json.dumps(decisions))
 
 
 class Client:
     def __init__(self, messages):
-        self.messages = messages
+        self.messages = checked(messages)
 
 
 class Reverse:
@@ -118,7 +105,7 @@ def test_identity_noise_is_reported_separately():
                 decisions = json.loads(response.content[0].text)
                 decisions[0] = {"index": 0, "matched_topic_id": None,
                                 "new_topic": {"name": "Night", "slug": "night", "description": "d"}}
-                return Response(json.dumps(decisions))
+                return text_response(json.dumps(decisions))
             return response
 
     result = oracles.check_matching_scenario(SCENARIO, Client(Flaky(CONSISTENT)), Reverse())
@@ -151,7 +138,7 @@ class ByTitle:
         self.calls += 1
         prompt = kwargs["messages"][0]["content"]
         title = next(t for t in self.answers if t in prompt)
-        return Response(self.answers[title])
+        return text_response(self.answers[title])
 
 
 def extraction(signal_type):
@@ -184,7 +171,7 @@ def test_generate_paraphrases_parses_and_trims():
     class One:
         def create(self, **kwargs):
             assert kwargs["model"] == paraphrase.PARAPHRASE_MODEL
-            return Response(json.dumps([{"title": " A ", "content": "x"}, {"title": "", "content": "y"},
+            return text_response(json.dumps([{"title": " A ", "content": "x"}, {"title": "", "content": "y"},
                                         "junk", {"title": "B", "content": "z"}, {"title": "C", "content": "w"}]))
 
     assert paraphrase.generate_paraphrases(Client(One()), EXAMPLE.evidence, 2) == [
@@ -194,7 +181,7 @@ def test_generate_paraphrases_parses_and_trims():
 def test_generate_paraphrases_rejects_unusable_output():
     class Bad:
         def create(self, **kwargs):
-            return Response("[]")
+            return text_response("[]")
 
     with pytest.raises(paraphrase.ParaphraseError):
         paraphrase.generate_paraphrases(Client(Bad()), EXAMPLE.evidence, 2)

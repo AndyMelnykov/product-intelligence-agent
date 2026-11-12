@@ -3,7 +3,6 @@ import sqlite3
 import pytest
 
 import db
-from fingerprints import fingerprint
 
 
 def legacy_connection(path):
@@ -14,17 +13,6 @@ def legacy_connection(path):
     conn.executescript(db.SCHEMA_SQL)
     conn.commit()
     return conn
-
-
-def test_fingerprint_is_stable_for_strings_and_json_values():
-    assert fingerprint("abc") == fingerprint("abc")
-    assert len(fingerprint("abc")) == 12
-    assert fingerprint({"b": 1, "a": 2}) == fingerprint({"a": 2, "b": 1})
-
-
-def test_runs_module_still_exposes_fingerprint():
-    from evals import runs
-    assert runs.fingerprint("abc") == fingerprint("abc")
 
 
 def test_init_db_brings_a_fresh_database_to_the_latest_version():

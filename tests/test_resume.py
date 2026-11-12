@@ -10,6 +10,7 @@ import extract
 import fetch
 import match
 import materiality
+from anthropic_fake import checked, text_response
 
 
 class SimulatedCrash(BaseException):
@@ -40,19 +41,6 @@ class Reddit:
         return self._sub
 
 
-class Text:
-    type = "text"
-
-    def __init__(self, text):
-        self.text = text
-
-
-class Response:
-    def __init__(self, text):
-        self.content = [Text(text)]
-        self.stop_reason = "end_turn"
-
-
 class Messages:
     def __init__(self, responses, crash_on=None):
         self._responses, self._crash_on, self.calls = list(responses), crash_on, 0
@@ -61,12 +49,12 @@ class Messages:
         self.calls += 1
         if self.calls == self._crash_on:
             raise SimulatedCrash()
-        return Response(self._responses.pop(0))
+        return text_response(self._responses.pop(0))
 
 
 class Client:
     def __init__(self, responses, crash_on=None):
-        self.messages = Messages(responses, crash_on)
+        self.messages = checked(Messages(responses, crash_on))
 
 
 EXTRACTED = json.dumps({"signal_type": "new_feature_demand", "summary": "wants dark mode", "confidence": 0.9})

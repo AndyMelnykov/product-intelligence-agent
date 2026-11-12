@@ -8,6 +8,7 @@ import fetch
 import match
 import materiality
 import report
+from anthropic_fake import FakeAnthropic as FakeAnthropicClient
 
 
 class FakeSubmission:
@@ -36,31 +37,6 @@ class FakeRedditClient:
 
     def subreddit(self, name):
         return self._subreddits[name]
-
-
-class FakeContentBlock:
-    type = "text"
-
-    def __init__(self, text):
-        self.text = text
-
-
-class FakeResponse:
-    def __init__(self, text):
-        self.content = [FakeContentBlock(text)]
-
-
-class FakeMessages:
-    def __init__(self, responses):
-        self._responses = list(responses)
-
-    def create(self, **kwargs):
-        return FakeResponse(self._responses.pop(0))
-
-
-class FakeAnthropicClient:
-    def __init__(self, responses):
-        self.messages = FakeMessages(responses)
 
 
 def test_full_pipeline_from_fetch_to_report(tmp_path):

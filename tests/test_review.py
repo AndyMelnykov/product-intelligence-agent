@@ -1,44 +1,20 @@
 import json
 from datetime import date
-from types import SimpleNamespace
 
 import pytest
 
 import db
 import registry
 import review
+from anthropic_fake import FakeAnthropic, text_response
 from llm import LLMReply
 
 WEEK = "2026-W33"
 TODAY = date(2026, 8, 15)
 
 
-class Text:
-    type = "text"
-
-    def __init__(self, text):
-        self.text = text
-
-
-class Response:
-    def __init__(self, text, stop_reason="end_turn", model="claude-opus-5-5"):
-        self.content, self.stop_reason, self.model = [Text(text)], stop_reason, model
-
-
-class BetaMessages:
-    def __init__(self, responses):
-        self.responses, self.kwargs = list(responses), []
-
-    def create(self, **kwargs):
-        self.kwargs.append(kwargs)
-        result = self.responses.pop(0)
-        if isinstance(result, Exception):
-            raise result
-        return result if isinstance(result, Response) else Response(result)
-
-
 def client(*responses):
-    return SimpleNamespace(beta=SimpleNamespace(messages=BetaMessages(responses)))
+    return FakeAnthropic(list(responses), beta=True)
 
 
 def seed(path):
@@ -115,7 +91,7 @@ def test_run_calls_opus_with_fallbacks_and_stores_items(tmp_path):
 
     assert review.run(db_path=path, today=TODAY, client=fake) == 1
 
-    sent = fake.beta.messages.kwargs[0]
+    sent = fake.calls[0]
     assert sent["model"] == "claude-opus-5-5"
     assert sent["betas"] == ["server-side-fallback-2026-07-01"] and sent["fallbacks"] == "default"
     assert sent["output_config"] == {"effort": "high"}
@@ -150,7 +126,7 @@ def test_run_records_refusals_and_raises(tmp_path):
     seed(path)
 
     with pytest.raises(review.ReviewResponseError):
-        review.run(db_path=path, today=TODAY, client=client(Response("", stop_reason="refusal")))
+        review.run(db_path=path, today=TODAY, client=client(text_response("", stop_reason="refusal")))
 
     conn = db.connect(path)
     assert conn.execute("SELECT status FROM llm_call").fetchone()[0] == "response_error"
