@@ -20,9 +20,9 @@ def topic(conn, slug, name, first_seen="2026-W30"):
                                      aliases=[], first_seen=first_seen, last_seen=first_seen)
 
 
-def candidate(conn, topic_id, captured_at="2026-08-15T00:00:00+00:00", n=[0]):
-    n[0] += 1
-    evidence_id = db.insert_evidence(conn, source_type="reddit_post", source_name="s", source_url=f"/{n[0]}",
+def candidate(conn, topic_id, captured_at="2026-08-15T00:00:00+00:00"):
+    next_n = conn.execute("SELECT COUNT(*) FROM evidence").fetchone()[0] + 1
+    evidence_id = db.insert_evidence(conn, source_type="reddit_post", source_name="s", source_url=f"/{next_n}",
                                      captured_at=captured_at, published_at=captured_at, title="t", content="c", metadata={})
     candidate_id = db.insert_signal_candidate(conn, evidence_id=evidence_id, signal_type="new_feature_demand",
                                               summary="s", confidence=0.9, topic_id=topic_id)
