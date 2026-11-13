@@ -244,17 +244,14 @@ def test_run_keeps_healthy_subreddits_and_raises_naming_the_failed_one(tmp_path)
     conn.close()
 
 
-def test_run_keeps_earlier_subreddits_when_a_later_one_fails_unexpectedly(tmp_path, monkeypatch):
-    def failing_fetch(client, subreddit_name, last_seen_fullname, limit):
-        if subreddit_name == "subb":
-            raise RuntimeError("bug")
-        return [{"id": "a1", "title": "A title", "selftext": "body", "permalink": "/r/test/comments/t3_a1",
-                 "score": 10, "num_comments": 2, "created_utc": 1700000000.0}], "t3_a1"
-
-    monkeypatch.setattr(fetch, "fetch_new_posts", failing_fetch)
+def test_run_keeps_earlier_subreddits_when_a_later_one_fails_unexpectedly(tmp_path):
+    client = FakeRedditClient({
+        "suba": FakeSubreddit([make_submission("t3_a1")]),
+        "subb": FakeErrorSubreddit(RuntimeError("bug")),
+    })
 
     with pytest.raises(RuntimeError):
-        _run(tmp_path, FakeRedditClient({}), ["suba", "subb"])
+        _run(tmp_path, client, ["suba", "subb"])
 
     assert [r["source_key"] for r in _evidence(tmp_path)] == ["reddit_post:a1"]
 

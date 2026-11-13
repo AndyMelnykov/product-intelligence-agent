@@ -1,3 +1,4 @@
+import pytest
 import yaml
 
 import db
@@ -39,7 +40,7 @@ def test_build_scenario_uses_the_previous_weeks_registry_and_this_weeks_candidat
     ]
 
 
-def test_main_writes_a_file_the_loader_refuses_until_draft_is_removed(tmp_path, capsys):
+def test_main_writes_a_file_the_loader_refuses_until_draft_is_removed(tmp_path):
     path = str(tmp_path / "pi.db")
     seed(path)
     out_dir = tmp_path / "golden"
@@ -48,11 +49,8 @@ def test_main_writes_a_file_the_loader_refuses_until_draft_is_removed(tmp_path, 
 
     assert export_matching_scenario.main(["--db-path", path, "--week", "2026-W33", "--out", str(out)]) == 0
 
-    try:
+    with pytest.raises(harness.GoldenSchemaError, match="draft scenario"):
         harness.load_golden_dir(out_dir, "matching")
-        raise AssertionError("draft scenario should be rejected")
-    except harness.GoldenSchemaError as e:
-        assert "draft scenario" in str(e)
 
     data = yaml.safe_load(out.read_text(encoding="utf-8"))
     del data["draft"]

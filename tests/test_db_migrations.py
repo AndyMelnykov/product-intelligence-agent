@@ -74,12 +74,18 @@ def test_init_db_upgrades_a_legacy_database_and_keeps_its_rows(tmp_path):
     assert db.schema_version(conn) == max((v for v, _ in db.MIGRATIONS), default=0)
 
 
-def test_add_column_is_idempotent():
-    conn = db.connect(":memory:")
+def test_init_db_upgrades_a_legacy_database_that_already_has_a_migrated_column(tmp_path):
+    path = tmp_path / "legacy.db"
+    conn = legacy_connection(path)
+    conn.execute("ALTER TABLE evidence ADD COLUMN source_key TEXT")
+    conn.commit()
+    conn.close()
+
+    conn = db.connect(str(path))
     db.init_db(conn)
-    db._add_column(conn, "evidence", "scratch TEXT")
-    db._add_column(conn, "evidence", "scratch TEXT")
-    assert "scratch" in db._column_names(conn, "evidence")
+
+    assert db.schema_version(conn) == max(v for v, _ in db.MIGRATIONS)
+    assert "source_key" in [r[1] for r in conn.execute("PRAGMA table_info(evidence)")]
 
 
 def test_utc_now_is_iso_utc_to_the_second():

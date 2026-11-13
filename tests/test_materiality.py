@@ -67,21 +67,6 @@ def test_classify_materiality_low_for_event_driven_type_below_confidence_thresho
     assert result["label"] == "low"
 
 
-def test_dominant_signal_type_returns_single_type():
-    candidates = [
-        {"evidence_id": "EV-2026-000001", "signal_type": "new_feature_demand", "summary": "s", "confidence": 0.9},
-    ]
-    assert materiality._dominant_signal_type(candidates) == "new_feature_demand"
-
-
-def test_dominant_signal_type_returns_mixed_marker_for_multiple_types():
-    candidates = [
-        {"evidence_id": "EV-2026-000001", "signal_type": "new_feature_demand", "summary": "s", "confidence": 0.9},
-        {"evidence_id": "EV-2026-000002", "signal_type": "usability_issue", "summary": "s2", "confidence": 0.8},
-    ]
-    assert materiality._dominant_signal_type(candidates) == "mixed_signal_types"
-
-
 def test_build_material_signal_shape_for_rising_trend():
     topic = {"topic_id": "TOPIC-0001", "name": "Dark mode support"}
     candidates_this_week = [
@@ -104,6 +89,19 @@ def test_build_material_signal_shape_for_rising_trend():
     assert signal["evidence_ids"] == ["EV-2026-000001", "EV-2026-000002"]
     assert signal["change_type"] == "trend_change"
     assert signal["recommended_next_step"] == "strategic_assessment"
+
+
+def test_build_material_signal_marks_mixed_signal_types():
+    topic = {"topic_id": "TOPIC-0001", "name": "Dark mode support"}
+    candidates = [
+        {"evidence_id": "EV-2026-000001", "signal_type": "new_feature_demand", "summary": "s", "confidence": 0.9},
+        {"evidence_id": "EV-2026-000002", "signal_type": "usability_issue", "summary": "s2", "confidence": 0.8},
+    ]
+    signal = materiality.build_material_signal(
+        topic, candidates, trend="rising",
+        materiality={"label": "high", "score": 0.8, "reasons": ["rising"]}, today=date(2026, 8, 23),
+    )
+    assert signal["signal_type"] == "mixed_signal_types"
 
 
 def test_build_material_signal_marks_new_event_and_urgent_step_for_critical():
@@ -307,21 +305,26 @@ def test_rerunning_the_same_week_creates_no_duplicate_signal_or_event(tmp_path):
     assert len(_lines(events)) == 1
 
 
-def test_escalation_within_a_week_emits_a_second_signal(tmp_path, monkeypatch):
+def test_escalation_within_a_week_emits_a_second_signal(tmp_path):
     db_path, events = str(tmp_path / "pi_agent.db"), tmp_path / "events.jsonl"
-    _seed_high_topic(db_path)
+    topic_id = _seed_high_topic(db_path)
     materiality.run(db_path=db_path, today=date(2026, 8, 15), events_path=str(events))
 
-    real = materiality.classify_materiality
-    monkeypatch.setattr(materiality, "classify_materiality",
-                        lambda **kw: {**real(**kw), "label": "critical", "score": 0.95})
+    # Same evidence, now classified as a critical-impact type: the real rule table escalates it.
+    conn = db.connect(db_path)
+    conn.execute("UPDATE signal_candidate SET signal_type = 'implementation_deadline' WHERE topic_id = ?",
+                 (topic_id,))
+    conn.commit()
+    conn.close()
     materiality.run(db_path=db_path, today=date(2026, 8, 15), events_path=str(events))
 
     conn = db.connect(db_path)
-    labels = [r[0] for r in conn.execute("SELECT materiality_label FROM material_signal ORDER BY signal_id")]
+    labels = [r[0] for r in conn.execute(
+        "SELECT materiality_label FROM material_signal WHERE topic_id = ? ORDER BY signal_id", (topic_id,))]
     assert labels == ["high", "critical"]
     reasons = json.loads(conn.execute(
-        "SELECT materiality_reasons FROM material_signal WHERE materiality_label = 'critical'").fetchone()[0])
+        "SELECT materiality_reasons FROM material_signal WHERE topic_id = ? AND materiality_label = 'critical'",
+        (topic_id,)).fetchone()[0])
     assert any(r.startswith("escalated from high") for r in reasons)
     assert len(_lines(events)) == 2
 

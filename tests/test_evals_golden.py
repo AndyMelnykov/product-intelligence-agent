@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from evals import harness
 
 GOLDEN_DIR = Path(__file__).resolve().parent.parent / "evals" / "golden"
@@ -26,7 +28,8 @@ def test_committed_judge_calibration_set_is_valid_and_labeled():
 
 def test_committed_paraphrase_files_are_valid():
     from evals import paraphrase
-    if not paraphrase.PARAPHRASE_DIR.exists():
-        return
-    for path in paraphrase.PARAPHRASE_DIR.glob("*.yaml"):
-        paraphrase.load_paraphrases(path.stem)
+    paths = sorted(paraphrase.PARAPHRASE_DIR.glob("*.yaml")) if paraphrase.PARAPHRASE_DIR.exists() else []
+    if not paths:
+        pytest.skip("no committed paraphrase files")
+    for path in paths:
+        assert paraphrase.load_paraphrases(path.stem), f"{path.name} loaded no examples"
