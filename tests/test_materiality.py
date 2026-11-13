@@ -67,21 +67,6 @@ def test_classify_materiality_low_for_event_driven_type_below_confidence_thresho
     assert result["label"] == "low"
 
 
-def test_dominant_signal_type_returns_single_type():
-    candidates = [
-        {"evidence_id": "EV-2026-000001", "signal_type": "new_feature_demand", "summary": "s", "confidence": 0.9},
-    ]
-    assert materiality._dominant_signal_type(candidates) == "new_feature_demand"
-
-
-def test_dominant_signal_type_returns_mixed_marker_for_multiple_types():
-    candidates = [
-        {"evidence_id": "EV-2026-000001", "signal_type": "new_feature_demand", "summary": "s", "confidence": 0.9},
-        {"evidence_id": "EV-2026-000002", "signal_type": "usability_issue", "summary": "s2", "confidence": 0.8},
-    ]
-    assert materiality._dominant_signal_type(candidates) == "mixed_signal_types"
-
-
 def test_build_material_signal_shape_for_rising_trend():
     topic = {"topic_id": "TOPIC-0001", "name": "Dark mode support"}
     candidates_this_week = [
@@ -104,6 +89,19 @@ def test_build_material_signal_shape_for_rising_trend():
     assert signal["evidence_ids"] == ["EV-2026-000001", "EV-2026-000002"]
     assert signal["change_type"] == "trend_change"
     assert signal["recommended_next_step"] == "strategic_assessment"
+
+
+def test_build_material_signal_marks_mixed_signal_types():
+    topic = {"topic_id": "TOPIC-0001", "name": "Dark mode support"}
+    candidates = [
+        {"evidence_id": "EV-2026-000001", "signal_type": "new_feature_demand", "summary": "s", "confidence": 0.9},
+        {"evidence_id": "EV-2026-000002", "signal_type": "usability_issue", "summary": "s2", "confidence": 0.8},
+    ]
+    signal = materiality.build_material_signal(
+        topic, candidates, trend="rising",
+        materiality={"label": "high", "score": 0.8, "reasons": ["rising"]}, today=date(2026, 8, 23),
+    )
+    assert signal["signal_type"] == "mixed_signal_types"
 
 
 def test_build_material_signal_marks_new_event_and_urgent_step_for_critical():
